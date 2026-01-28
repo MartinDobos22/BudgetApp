@@ -39,24 +39,27 @@ function guessStoreGroup(name) {
 
 function buildAiCategoryMap(items, aiCategories) {
   if (!Array.isArray(aiCategories) || aiCategories.length === 0) return null;
-  return new Map(aiCategories.map((entry) => [entry?.id, entry]));
+
+  const byId = new Map();
+  aiCategories.forEach((entry) => {
+    const id = Number(entry?.id);
+    if (!Number.isNaN(id)) {
+      byId.set(id, entry);
+    }
+  });
+
+  const byName = new Map();
+  aiCategories.forEach((entry) => {
+    const key = normalizeText(entry?.name);
+    if (key && !byName.has(key)) {
+      byName.set(key, entry);
+    }
+  });
+
+  return new Map(
+    items.map((item, idx) => [idx, byId.get(idx) || byName.get(normalizeText(item?.name)) || null]),
+  );
 }
-
-
-// function buildAiCategoryMap(items, aiCategories) {
-//   if (!Array.isArray(aiCategories) || aiCategories.length === 0) return null;
-//   if (aiCategories.length === items.length) {
-//     return new Map(aiCategories.map((entry, idx) => [idx, entry?.category || ""]));
-//   }
-//   const byName = new Map();
-//   aiCategories.forEach((entry) => {
-//     const key = normalizeText(entry?.name);
-//     if (key && !byName.has(key)) {
-//       byName.set(key, entry?.category || "");
-//     }
-//   });
-//   return new Map(items.map((item, idx) => [idx, byName.get(normalizeText(item?.name))]));
-// }
 
 export default function App() {
   const [file, setFile] = useState(null);
