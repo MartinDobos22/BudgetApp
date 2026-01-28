@@ -39,18 +39,24 @@ function guessStoreGroup(name) {
 
 function buildAiCategoryMap(items, aiCategories) {
   if (!Array.isArray(aiCategories) || aiCategories.length === 0) return null;
-  if (aiCategories.length === items.length) {
-    return new Map(aiCategories.map((entry, idx) => [idx, entry?.category || ""]));
-  }
-  const byName = new Map();
-  aiCategories.forEach((entry) => {
-    const key = normalizeText(entry?.name);
-    if (key && !byName.has(key)) {
-      byName.set(key, entry?.category || "");
-    }
-  });
-  return new Map(items.map((item, idx) => [idx, byName.get(normalizeText(item?.name))]));
+  return new Map(aiCategories.map((entry) => [entry?.id, entry]));
 }
+
+
+// function buildAiCategoryMap(items, aiCategories) {
+//   if (!Array.isArray(aiCategories) || aiCategories.length === 0) return null;
+//   if (aiCategories.length === items.length) {
+//     return new Map(aiCategories.map((entry, idx) => [idx, entry?.category || ""]));
+//   }
+//   const byName = new Map();
+//   aiCategories.forEach((entry) => {
+//     const key = normalizeText(entry?.name);
+//     if (key && !byName.has(key)) {
+//       byName.set(key, entry?.category || "");
+//     }
+//   });
+//   return new Map(items.map((item, idx) => [idx, byName.get(normalizeText(item?.name))]));
+// }
 
 export default function App() {
   const [file, setFile] = useState(null);
@@ -128,12 +134,16 @@ export default function App() {
     const suggestedStore = guessStoreGroup(organization?.name);
     setStoreGroup((prev) => prev || suggestedStore);
     const aiMap = buildAiCategoryMap(items, aiCategories);
-    console.log("[FE] using AI categories", { items: items.length, ai: aiCategories.length });
+    console.log("[FE] using AI categories.js", { items: items.length, ai: aiCategories.length });
     setCategorizedItems(
-      items.map((item, idx) => ({
-        ...item,
-        category: aiMap?.get(idx) || "",
-      })),
+        items.map((item, idx) => {
+          const ai = aiMap?.get(idx);
+          return {
+            ...item,
+            category: ai?.category || "",
+            categoryKey: ai?.categoryKey || "",
+          };
+        })
     );
   }, [receipt, organization?.name, items, aiCategories]);
 
@@ -155,7 +165,7 @@ export default function App() {
 
   function applyAutoCategories() {
     const aiMap = buildAiCategoryMap(items, aiCategories);
-    console.log("[FE] applying AI categories from backend");
+    console.log("[FE] applying AI categories.js from backend");
     setCategorizedItems((prev) =>
       prev.map((item, idx) => ({
         ...item,
@@ -224,7 +234,7 @@ export default function App() {
         console.log("[FE] backend success", { cached: data?.cached, aiCategories: data?.aiCategories?.length || 0 });
         console.log("[FE] AI request payload", data?.aiDebug?.requestPayload || data?.aiDebug?.request || null);
         console.log("[FE] AI response raw", data?.aiDebug?.rawResponse || data?.aiDebug?.raw || null);
-        console.log("[FE] AI parsed categories", data?.aiDebug?.parsed || data?.aiCategories || null);
+        console.log("[FE] AI parsed categories.js", data?.aiDebug?.parsed || data?.aiCategories || null);
         setResp(data);
       }
     } catch (e) {
