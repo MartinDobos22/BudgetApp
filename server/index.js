@@ -1,8 +1,42 @@
+const fs = require("fs");
+const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
 const Jimp = require("jimp");
 const QrCode = require("qrcode-reader");
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return;
+  }
+
+  const contents = fs.readFileSync(filePath, "utf8");
+  contents.split(/\r?\n/).forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      return;
+    }
+
+    const eqIndex = trimmed.indexOf("=");
+    if (eqIndex === -1) {
+      return;
+    }
+
+    const key = trimmed.slice(0, eqIndex).trim();
+    let value = trimmed.slice(eqIndex + 1).trim();
+
+    if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+
+    if (key && process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  });
+}
+
+loadEnvFile(path.resolve(process.cwd(), ".env"));
 
 const app = express();
 app.use(cors());
