@@ -7,6 +7,9 @@ const QrCode = require("qrcode-reader");
 const app = express();
 app.use(cors());
 
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
@@ -221,6 +224,85 @@ function cacheSet(key, value) {
   }
 }
 
+// ----- AI kategorizácia -----
+
+const CATEGORY_OPTIONS = [
+  "Mliečne výrobky",
+  "Sladké pečivo",
+  "Slané pečivo",
+  "Klasické pečivo",
+  "Šunky",
+  "Salámy",
+  "Mäso",
+  "Zelenina",
+  "Ovocie",
+  "Nápoje",
+  "Domáce potreby",
+  "Drogéria",
+  "Trvanlivé potraviny",
+  "Iné",
+];
+
+async function categorizeItemsWithOpenAI(items) {
+  if (!OPENAI_API_KEY) return null;
+  if (!Array.isArray(items) || items.length === 0) return [];
+
+  const payload = {
+    model: OPENAI_MODEL,
+    temperature: 0,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Si pomocník na kategorizáciu položiek z pokladničných bločkov. " +
+          "Dostaneš zoznam položiek a povolených kategórií. " +
+          "Vráť iba JSON bez ďalšieho textu.",
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          categories: CATEGORY_OPTIONS,
+          items: items.map((item, idx) => ({
+            id: idx,
+            name: item?.name || "",
+          })),
+          outputFormat: "Array<{id:number, category:string}>",
+        }),
+      },
+    ],
+  };
+
+  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await resp.json();
+  if (!resp.ok) {
+    console.warn("OpenAI categorize failed:", data?.error || data);
+    return null;
+  }
+
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) return null;
+  try {
+    const parsed = JSON.parse(content);
+    if (!Array.isArray(parsed)) return null;
+    const byId = new Map(parsed.map((entry) => [entry?.id, entry?.category]));
+    return items.map((item, idx) => ({
+      name: item?.name || "",
+      category: byId.get(idx) || "Iné",
+    }));
+  } catch (e) {
+    console.warn("OpenAI categorize parse failed:", e?.message || e);
+    return null;
+  }
+}
+
 // ----- Routes -----
 
 app.get("/api/health", (req, res) => {
@@ -259,13 +341,15 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
 
     const cached = cacheGet(cacheKey);
     if (cached) {
-      return res.json({ ok: true, qrText, lookup, fsJson: cached, cached: true });
+      const aiCategories = await categorizeItemsWithOpenAI(cached?.receipt?.items || []);
+      return res.json({ ok: true, qrText, lookup, fsJson: cached, cached: true, aiCategories });
     }
 
     const fsJson = await fetchReceiptFromFS(lookup.payload);
     cacheSet(cacheKey, fsJson);
 
-    res.json({ ok: true, qrText, lookup, fsJson, cached: false });
+    const aiCategories = await categorizeItemsWithOpenAI(fsJson?.receipt?.items || []);
+    res.json({ ok: true, qrText, lookup, fsJson, cached: false, aiCategories });
   } catch (e) {
     console.error(e);
     res.status(e.status || 500).json({
