@@ -265,6 +265,7 @@ function cacheSet(key, value) {
 
 // ----- AI kategorizácia -----
 
+
 function extractJsonFromOpenAI(content) {
   const trimmed = String(content || "").trim();
   if (!trimmed) return "";
@@ -275,75 +276,298 @@ function extractJsonFromOpenAI(content) {
   return trimmed;
 }
 
+function normalizeName(name) {
+  return String(name || "")
+      .replace(/\s+/g, " ")
+      .trim();
+}
+
+/**
+ * Jednoduché deterministické pravidlá (fallback / sanity).
+ * Vráti kategóriu alebo "".
+ */
+function ruleBasedCategory(item) {
+  const name = normalizeName(item?.name);
+  const upper = name.toUpperCase();
+  const itemType = item?.itemType;
+
+  // 1) Zľavy
+  if (itemType === "Z" || /\bZĽAVA\b|\bZLAVA\b/i.test(name)) return "Zľavy";
+
+  // 2) Zálohy / obaly
+  if (/\bZÁLOHA\b|\bZALOHA\b|\bPET\b/i.test(name)) return "Zálohy a obaly";
+
+  // 3) Voda / nápoje
+  if (/\bRAJEC\b/i.test(name) || /\bVODA\b/i.test(name)) return "Nápoje/Voda";
+
+  // 4) Syry
+  if (/\bMOZZA\b|\bMOZZAR\b|\bEIDAM\b|\bSYR\b/i.test(name)) return "Mliečne výrobky/Syry";
+
+  // 5) Toastový chlieb vs toastová šunka
+  const hasToast = /\bTOAS\b|\bTOAST\b|\bTOST\b/i.test(name);
+  const hasHam = /\bŠUNKA\b|\bSUNKA\b|\bHAM\b/i.test(name);
+  if (hasToast && hasHam) return "Udeniny/Šunka";
+  if (hasToast && !hasHam) return "Pečivo/Toastový chlieb";
+
+  // 6) Saláma
+  if (/\bSAL\.\b|\bSALAMA\b|\bSALÁMA\b|\bSALAMI\b/i.test(name)) return "Udeniny/Saláma";
+
+  // 7) Olivy
+  if (/\bOLIV\b/i.test(name)) return "Trvanlivé potraviny/Olivy";
+
+  // 8) Kukurica / konzerva
+  if (/\bKUK\b|\bKUKUR\b/i.test(name)) return "Trvanlivé potraviny/Konzervy";
+
+  // 9) Sója / rastlinné (tvoje "sój.suk")
+  if (/\bSÓJ\b|\bSOJ\b/i.test(name)) return "Trvanlivé potraviny/Rastlinné";
+
+  // nič
+  return "";
+}
+
+const SYSTEM_PROMPT = `
+Si pomocník na kategorizáciu položiek z pokladničných bločkov (Slovensko).
+Dostaneš zoznam položiek (items). Každú položku priraď do kategórie.
+
+PRAVIDLÁ:
+- Vráť striktne iba JSON (žiadny text, žiadne markdown, žiadne \`\`\`).
+- Výstup musí obsahovať položku pre KAŽDÝ vstupný item, v rovnakom poradí.
+- id je index položky v poli items (0..n-1).
+- Ak je itemType = "Z" alebo názov obsahuje "ZĽAVA"/"ZLAVA", kategória je "Zľavy".
+- Ak názov obsahuje "ZÁLOHA"/"ZALOHA" alebo "PET", kategória je "Zálohy a obaly".
+- Ak si nie si istý, použi "Iné".
+
+FORMÁT kategórie:
+Použi hierarchiu "TopKategória/Subkategória" (lomka je dôležitá), napr.:
+- "Pečivo/Toastový chlieb", "Pečivo/Sladké", "Pečivo/Slané", "Pečivo/Klasické"
+- "Mliečne výrobky/Syry", "Mliečne výrobky/Mlieko", "Mliečne výrobky/Jogurty"
+- "Udeniny/Šunka", "Udeniny/Saláma"
+- "Nápoje/Voda", "Nápoje/Nealko", "Nápoje/Iné"
+- "Trvanlivé potraviny/Konzervy", "Trvanlivé potraviny/Olivy", "Trvanlivé potraviny/Rastlinné"
+- "Ovocie a zelenina/Ovocie", "Ovocie a zelenina/Zelenina"
+- "Snacky/Slané", "Sladkosti/Sladké"
+- "Zľavy"
+- "Zálohy a obaly"
+- "Iné"
+
+Pri skratkách z bločkov sa spoliehaj na typické významy:
+- "tost/toast/toas" = toastový chlieb alebo toastová šunka podľa kontextu
+- "eidam/mozza" = syry
+- "RAJEC" často voda
+`.trim();
+
+function buildUserPayload(fsJson) {
+  const orgName = fsJson?.receipt?.organization?.name || null;
+  const items = Array.isArray(fsJson?.receipt?.items) ? fsJson.receipt.items : [];
+
+  return {
+    store: orgName,
+    items: items.map((it, idx) => ({
+      id: idx,
+      name: normalizeName(it?.name),
+      itemType: it?.itemType ?? null,
+      quantity: it?.quantity ?? null,
+      price: it?.price ?? null,
+      vatRate: it?.vatRate ?? null,
+    })),
+  };
+}
+
+/**
+ * Drop-in replacement.
+ * Zachováva tvoj return tvar: { categories, debug }
+ */
 async function categorizeItemsWithOpenAI(fsJson) {
   if (!OPENAI_API_KEY) {
     logStep("ai", "OPENAI_API_KEY missing, skipping categorization");
     return { categories: null, debug: { skipped: true, reason: "missing_api_key" } };
   }
+
   const items = fsJson?.receipt?.items || [];
   if (!Array.isArray(items) || items.length === 0) {
     logStep("ai", "No items to categorize");
     return { categories: [], debug: { skipped: true, reason: "no_items" } };
   }
 
-  const payload = {
-    model: OPENAI_MODEL,
-    temperature: 0,
-    messages: [
-      {
-        role: "system",
-        content:
-          "Si pomocník na kategorizáciu položiek z pokladničných bločkov. " +
-          "Dostaneš celý JSON bločku. " +
-          "Vráť iba JSON bez ďalšieho textu.",
+  const userPayload = buildUserPayload(fsJson);
+
+  // JSON schema pre Structured Outputs
+  const responseFormatJsonSchema = {
+    type: "json_schema",
+    json_schema: {
+      name: "receipt_item_categories",
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          results: {
+            type: "array",
+            minItems: items.length,
+            maxItems: items.length,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                id: { type: "integer", minimum: 0, maximum: Math.max(0, items.length - 1) },
+                category: { type: "string" },
+                normalizedName: { type: "string" },
+              },
+              required: ["id", "category", "normalizedName"],
+            },
+          },
+        },
+        required: ["results"],
       },
-      {
-        role: "user",
-        content: JSON.stringify({
-          receiptJson: fsJson,
-          outputFormat: "Array<{id:number, name:string, category:string}>",
-        }),
-      },
-    ],
+    },
   };
 
-  logStep("ai", "Sending categorize request", { items: items.length, model: OPENAI_MODEL });
-  logStep("ai", "Request payload", { payload });
-  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  // Fallback: JSON mode (nie schema)
+  const responseFormatJsonObject = { type: "json_object" };
 
-  const data = await resp.json();
-  if (!resp.ok) {
-    console.warn("OpenAI categorize failed:", data?.error || data);
-    logStep("ai", "Categorize failed", { status: resp.status, error: data?.error || data });
-    return { categories: null, debug: { error: data?.error || data, status: resp.status } };
+  const baseMessages = [
+    { role: "system", content: SYSTEM_PROMPT },
+    { role: "user", content: JSON.stringify(userPayload) },
+  ];
+
+  async function callOpenAI(response_format) {
+    const payload = {
+      model: OPENAI_MODEL,
+      temperature: 0,
+      // novšie parametre: max_completion_tokens je preferovaný v chat API :contentReference[oaicite:1]{index=1}
+      max_completion_tokens: 800,
+      response_format,
+      messages: baseMessages,
+    };
+
+    logStep("ai", "Sending categorize request", {
+      items: items.length,
+      model: OPENAI_MODEL,
+      response_format: response_format?.type,
+    });
+
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await resp.json().catch(() => ({}));
+    return { resp, data, payload };
   }
 
-  const content = data?.choices?.[0]?.message?.content;
-  logStep("ai", "Response content", { content });
-  if (!content) return { categories: null, debug: { error: "empty_response" } };
+  let attempt1, attempt2;
   try {
+    // 1) Structured Outputs (json_schema)
+    attempt1 = await callOpenAI(responseFormatJsonSchema);
+
+    // Ak model nepodporuje response_format json_schema, sprav fallback
+    if (!attempt1.resp.ok) {
+      const msg = attempt1?.data?.error?.message || "";
+      const param = attempt1?.data?.error?.param || "";
+
+      const looksLikeSchemaUnsupported =
+          /response_format/i.test(msg) ||
+          /json_schema/i.test(msg) ||
+          param === "response_format";
+
+      if (looksLikeSchemaUnsupported) {
+        logStep("ai", "json_schema unsupported, falling back to json_object", {
+          status: attempt1.resp.status,
+          error: attempt1.data?.error || attempt1.data,
+        });
+
+        // 2) JSON mode fallback
+        attempt2 = await callOpenAI(responseFormatJsonObject);
+        if (!attempt2.resp.ok) {
+          logStep("ai", "Categorize failed (fallback too)", {
+            status: attempt2.resp.status,
+            error: attempt2.data?.error || attempt2.data,
+          });
+          return {
+            categories: null,
+            debug: {
+              status: attempt2.resp.status,
+              error: attempt2.data?.error || attempt2.data,
+              requestPayload: attempt2.payload,
+            },
+          };
+        }
+      } else {
+        // iná chyba
+        logStep("ai", "Categorize failed", {
+          status: attempt1.resp.status,
+          error: attempt1.data?.error || attempt1.data,
+        });
+        return {
+          categories: null,
+          debug: {
+            status: attempt1.resp.status,
+            error: attempt1.data?.error || attempt1.data,
+            requestPayload: attempt1.payload,
+          },
+        };
+      }
+    }
+
+    // vyber úspešný attempt
+    const okAttempt = attempt2?.resp?.ok ? attempt2 : attempt1;
+    const content = okAttempt?.data?.choices?.[0]?.message?.content;
+
+    logStep("ai", "Response content", { content });
+
+    if (!content) {
+      return { categories: null, debug: { error: "empty_response", raw: okAttempt?.data } };
+    }
+
     const parsed = JSON.parse(extractJsonFromOpenAI(content));
+
+    // json_schema -> {results:[...]}
+    // json_object fallback -> môže byť {results:[...]} alebo priamo pole
     const list = Array.isArray(parsed) ? parsed : parsed?.results;
-    if (!Array.isArray(list)) return { categories: null, debug: { error: "invalid_format", raw: parsed } };
-    const byId = new Map(list.map((entry) => [entry?.id, entry?.category]));
-    logStep("ai", "Categorize success", { categories: list.length });
-    const categories = items.map((item, idx) => ({
-      name: item?.name || "",
-      category: byId.get(idx) || "",
-    }));
+
+    if (!Array.isArray(list)) {
+      return { categories: null, debug: { error: "invalid_format", raw: parsed } };
+    }
+
+    const byId = new Map(
+        list
+            .filter((x) => Number.isInteger(x?.id))
+            .map((x) => [x.id, String(x?.category || "").trim()])
+    );
+
+    const categories = items.map((item, idx) => {
+      const aiCat = byId.get(idx) || "";
+      const ruleCat = ruleBasedCategory(item) || "";
+      return {
+        name: normalizeName(item?.name),
+        category: aiCat || ruleCat || "Iné",
+      };
+    });
+
+    logStep("ai", "Categorize success", { categories: categories.length });
     logStep("ai", "Categories output", { categories });
-    return { categories, debug: { requestPayload: payload, parsed: categories, rawResponse: content } };
+
+    return {
+      categories,
+      debug: {
+        requestPayload: okAttempt?.payload,
+        rawResponse: content,
+        parsedModelOutput: parsed,
+      },
+    };
   } catch (e) {
-    console.warn("OpenAI categorize parse failed:", e?.message || e);
     logStep("ai", "Categorize parse failed", { error: e?.message || String(e) });
-    return { categories: null, debug: { requestPayload: payload, error: e?.message || String(e), rawResponse: content } };
+    return {
+      categories: null,
+      debug: {
+        error: e?.message || String(e),
+        rawResponse: attempt2?.data || attempt1?.data,
+      },
+    };
   }
 }
 
