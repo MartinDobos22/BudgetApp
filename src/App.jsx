@@ -74,8 +74,9 @@ export default function App() {
   const receipt = resp?.fsJson?.receipt ?? null;
   const organization = receipt?.organization ?? null;
   const unit = receipt?.unit ?? null;
-  const items = receipt?.items ?? [];
+  const items = useMemo(() => receipt?.items ?? [], [receipt]);
   const vatSummary = receipt?.vatSummary ?? [];
+  const aiCategories = useMemo(() => resp?.aiCategories ?? [], [resp]);
   const totalPrice = receipt?.totalPrice ?? null;
   const totalItems = items.reduce((sum, item) => sum + (Number(item?.quantity) || 0), 0);
 
@@ -126,15 +127,15 @@ export default function App() {
     }
     const suggestedStore = guessStoreGroup(organization?.name);
     setStoreGroup((prev) => prev || suggestedStore);
-    const aiMap = buildAiCategoryMap(items, resp?.aiCategories);
-    console.log("[FE] using AI categories", { items: items.length, ai: resp?.aiCategories?.length || 0 });
+    const aiMap = buildAiCategoryMap(items, aiCategories);
+    console.log("[FE] using AI categories", { items: items.length, ai: aiCategories.length });
     setCategorizedItems(
       items.map((item, idx) => ({
         ...item,
         category: aiMap?.get(idx) || "",
       })),
     );
-  }, [receipt, organization?.name, items, resp?.aiCategories]);
+  }, [receipt, organization?.name, items, aiCategories]);
 
   function formatCurrency(value) {
     if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
@@ -153,7 +154,7 @@ export default function App() {
   }
 
   function applyAutoCategories() {
-    const aiMap = buildAiCategoryMap(items, resp?.aiCategories);
+    const aiMap = buildAiCategoryMap(items, aiCategories);
     console.log("[FE] applying AI categories from backend");
     setCategorizedItems((prev) =>
       prev.map((item, idx) => ({
