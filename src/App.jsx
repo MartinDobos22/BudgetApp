@@ -167,10 +167,14 @@ export default function App() {
     const aiMap = buildAiCategoryMap(items, aiCategories);
     console.log("[FE] applying AI categories.js from backend");
     setCategorizedItems((prev) =>
-      prev.map((item, idx) => ({
-        ...item,
-        category: aiMap?.get(idx) || "",
-      })),
+      prev.map((item, idx) => {
+        const entry = aiMap?.get(idx);
+        return {
+          ...item,
+          category: entry?.category || "",
+          categoryKey: entry?.categoryKey || "",
+        };
+      }),
     );
   }
 
