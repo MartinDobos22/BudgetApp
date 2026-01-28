@@ -265,23 +265,6 @@ function cacheSet(key, value) {
 
 // ----- AI kategorizácia -----
 
-const CATEGORY_OPTIONS = [
-  "Mliečne výrobky",
-  "Sladké pečivo",
-  "Slané pečivo",
-  "Klasické pečivo",
-  "Šunky",
-  "Salámy",
-  "Mäso",
-  "Zelenina",
-  "Ovocie",
-  "Nápoje",
-  "Domáce potreby",
-  "Drogéria",
-  "Trvanlivé potraviny",
-  "Iné",
-];
-
 function extractJsonFromOpenAI(content) {
   const trimmed = String(content || "").trim();
   if (!trimmed) return "";
@@ -292,14 +275,15 @@ function extractJsonFromOpenAI(content) {
   return trimmed;
 }
 
-async function categorizeItemsWithOpenAI(items) {
+async function categorizeItemsWithOpenAI(fsJson) {
   if (!OPENAI_API_KEY) {
     logStep("ai", "OPENAI_API_KEY missing, skipping categorization");
-    return null;
+    return { categories: null, debug: { skipped: true, reason: "missing_api_key" } };
   }
+  const items = fsJson?.receipt?.items || [];
   if (!Array.isArray(items) || items.length === 0) {
     logStep("ai", "No items to categorize");
-    return [];
+    return { categories: [], debug: { skipped: true, reason: "no_items" } };
   }
 
   const payload = {
@@ -310,24 +294,21 @@ async function categorizeItemsWithOpenAI(items) {
         role: "system",
         content:
           "Si pomocník na kategorizáciu položiek z pokladničných bločkov. " +
-          "Dostaneš zoznam položiek a povolených kategórií. " +
+          "Dostaneš celý JSON bločku. " +
           "Vráť iba JSON bez ďalšieho textu.",
       },
       {
         role: "user",
         content: JSON.stringify({
-          categories: CATEGORY_OPTIONS,
-          items: items.map((item, idx) => ({
-            id: idx,
-            name: item?.name || "",
-          })),
-          outputFormat: "Array<{id:number, category:string}>",
+          receiptJson: fsJson,
+          outputFormat: "Array<{id:number, name:string, category:string}>",
         }),
       },
     ],
   };
 
   logStep("ai", "Sending categorize request", { items: items.length, model: OPENAI_MODEL });
+  logStep("ai", "Request payload", { payload });
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -340,26 +321,29 @@ async function categorizeItemsWithOpenAI(items) {
   const data = await resp.json();
   if (!resp.ok) {
     console.warn("OpenAI categorize failed:", data?.error || data);
-    logStep("ai", "Categorize failed", { status: resp.status });
-    return null;
+    logStep("ai", "Categorize failed", { status: resp.status, error: data?.error || data });
+    return { categories: null, debug: { error: data?.error || data, status: resp.status } };
   }
 
   const content = data?.choices?.[0]?.message?.content;
-  if (!content) return null;
+  logStep("ai", "Response content", { content });
+  if (!content) return { categories: null, debug: { error: "empty_response" } };
   try {
     const parsed = JSON.parse(extractJsonFromOpenAI(content));
     const list = Array.isArray(parsed) ? parsed : parsed?.results;
-    if (!Array.isArray(list)) return null;
+    if (!Array.isArray(list)) return { categories: null, debug: { error: "invalid_format", raw: parsed } };
     const byId = new Map(list.map((entry) => [entry?.id, entry?.category]));
     logStep("ai", "Categorize success", { categories: list.length });
-    return items.map((item, idx) => ({
+    const categories = items.map((item, idx) => ({
       name: item?.name || "",
-      category: byId.get(idx) || "Iné",
+      category: byId.get(idx) || "",
     }));
+    logStep("ai", "Categories output", { categories });
+    return { categories, debug: { requestPayload: payload, parsed: categories, rawResponse: content } };
   } catch (e) {
     console.warn("OpenAI categorize parse failed:", e?.message || e);
     logStep("ai", "Categorize parse failed", { error: e?.message || String(e) });
-    return null;
+    return { categories: null, debug: { requestPayload: payload, error: e?.message || String(e), rawResponse: content } };
   }
 }
 
@@ -410,9 +394,17 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
     const cached = cacheGet(cacheKey);
     if (cached) {
       logStep("receipt", "Cache hit", { requestId });
-      const aiCategories = await categorizeItemsWithOpenAI(cached?.receipt?.items || []);
+      const aiResult = await categorizeItemsWithOpenAI(cached);
       logStep("receipt", "Returning cached response", { requestId });
-      return res.json({ ok: true, qrText, lookup, fsJson: cached, cached: true, aiCategories });
+      return res.json({
+        ok: true,
+        qrText,
+        lookup,
+        fsJson: cached,
+        cached: true,
+        aiCategories: aiResult?.categories || null,
+        aiDebug: aiResult?.debug || null,
+      });
     }
 
     logStep("receipt", "Fetching receipt from FS", { requestId });
@@ -420,9 +412,17 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
     logStep("receipt", "FS response received", { requestId });
     cacheSet(cacheKey, fsJson);
 
-    const aiCategories = await categorizeItemsWithOpenAI(fsJson?.receipt?.items || []);
-    logStep("receipt", "Returning response", { requestId, aiCategories: aiCategories?.length || 0 });
-    res.json({ ok: true, qrText, lookup, fsJson, cached: false, aiCategories });
+    const aiResult = await categorizeItemsWithOpenAI(fsJson);
+    logStep("receipt", "Returning response", { requestId, aiCategories: aiResult?.categories?.length || 0 });
+    res.json({
+      ok: true,
+      qrText,
+      lookup,
+      fsJson,
+      cached: false,
+      aiCategories: aiResult?.categories || null,
+      aiDebug: aiResult?.debug || null,
+    });
   } catch (e) {
     console.error(e);
     logStep("receipt", "Unhandled error", { requestId, error: e?.message || String(e) });

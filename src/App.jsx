@@ -10,38 +10,7 @@ const numberFormatter = new Intl.NumberFormat("sk-SK", {
   maximumFractionDigits: 2,
 });
 
-const CATEGORY_OPTIONS = [
-  "Mliečne výrobky",
-  "Sladké pečivo",
-  "Slané pečivo",
-  "Klasické pečivo",
-  "Šunky",
-  "Salámy",
-  "Mäso",
-  "Zelenina",
-  "Ovocie",
-  "Nápoje",
-  "Domáce potreby",
-  "Drogéria",
-  "Trvanlivé potraviny",
-  "Iné",
-];
-
-const CATEGORY_RULES = [
-  { category: "Mliečne výrobky", keywords: ["mlieko", "jogurt", "tvaroh", "syr", "maslo", "smot", "kef", "brynd", "acid", "taven"] },
-  { category: "Sladké pečivo", keywords: ["koláč", "croissant", "donut", "bábov", "buchta", "vianočka", "štrúd", "muffin", "dezert", "sladk"] },
-  { category: "Slané pečivo", keywords: ["rožok", "žemľa", "baget", "slan", "pracel", "tyčink", "krek"] },
-  { category: "Klasické pečivo", keywords: ["chlieb", "toast", "houska", "pečivo", "knäck", "raž", "pšeni"] },
-  { category: "Šunky", keywords: ["šunka", "ham", "prosci"] },
-  { category: "Salámy", keywords: ["salám", "salami", "klob", "choriz"] },
-  { category: "Mäso", keywords: ["kurac", "bravč", "hoväd", "mleté", "mäso", "steak"] },
-  { category: "Zelenina", keywords: ["zemiak", "parad", "uhork", "paprika", "cibu", "mrkv", "salát", "brokol", "karfi", "šampi"] },
-  { category: "Ovocie", keywords: ["jablk", "banán", "hrušk", "pomar", "mandar", "hroz", "jahod", "malin", "ovoc"] },
-  { category: "Nápoje", keywords: ["voda", "miner", "cola", "džús", "juice", "pivo", "víno", "drink", "čaj", "káva"] },
-  { category: "Domáce potreby", keywords: ["papier", "utierk", "vrecia", "hubk", "alobal", "fólia", "vrec", "ruč", "servít"] },
-  { category: "Drogéria", keywords: ["šampón", "mydlo", "sprch", "zub", "deterg", "jar", "prací", "aviv", "čisti"] },
-  { category: "Trvanlivé potraviny", keywords: ["ryža", "cestov", "olej", "konzerv", "fazul", "šošov", "cukor", "múka", "soľ"] },
-];
+const UNCATEGORIZED_LABEL = "Nezaradené";
 
 const STORE_GROUPS = [
   { label: "Lidl", keywords: ["lidl"] },
@@ -61,17 +30,6 @@ function normalizeText(value) {
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function guessCategory(name) {
-  const text = normalizeText(name);
-  if (!text) return "Iné";
-  for (const rule of CATEGORY_RULES) {
-    if (rule.keywords.some((keyword) => text.includes(normalizeText(keyword)))) {
-      return rule.category;
-    }
-  }
-  return "Iné";
-}
-
 function guessStoreGroup(name) {
   const text = normalizeText(name);
   if (!text) return "";
@@ -82,13 +40,13 @@ function guessStoreGroup(name) {
 function buildAiCategoryMap(items, aiCategories) {
   if (!Array.isArray(aiCategories) || aiCategories.length === 0) return null;
   if (aiCategories.length === items.length) {
-    return new Map(aiCategories.map((entry, idx) => [idx, entry?.category || "Iné"]));
+    return new Map(aiCategories.map((entry, idx) => [idx, entry?.category || ""]));
   }
   const byName = new Map();
   aiCategories.forEach((entry) => {
     const key = normalizeText(entry?.name);
     if (key && !byName.has(key)) {
-      byName.set(key, entry?.category || "Iné");
+      byName.set(key, entry?.category || "");
     }
   });
   return new Map(items.map((item, idx) => [idx, byName.get(normalizeText(item?.name))]));
@@ -125,7 +83,7 @@ export default function App() {
     const totals = {};
     history.forEach((entry) => {
       entry.items?.forEach((item) => {
-        const category = item?.category || "Iné";
+        const category = item?.category || UNCATEGORIZED_LABEL;
         const price = Number(item?.price) || 0;
         totals[category] = (totals[category] || 0) + price;
       });
@@ -169,15 +127,11 @@ export default function App() {
     const suggestedStore = guessStoreGroup(organization?.name);
     setStoreGroup((prev) => prev || suggestedStore);
     const aiMap = buildAiCategoryMap(items, resp?.aiCategories);
-    if (aiMap) {
-      console.log("[FE] using AI categories", { items: items.length, ai: resp?.aiCategories?.length || 0 });
-    } else {
-      console.log("[FE] using fallback category rules", { items: items.length });
-    }
+    console.log("[FE] using AI categories", { items: items.length, ai: resp?.aiCategories?.length || 0 });
     setCategorizedItems(
       items.map((item, idx) => ({
         ...item,
-        category: aiMap?.get(idx) || guessCategory(item?.name),
+        category: aiMap?.get(idx) || "",
       })),
     );
   }, [receipt, organization?.name, items, resp?.aiCategories]);
@@ -200,15 +154,11 @@ export default function App() {
 
   function applyAutoCategories() {
     const aiMap = buildAiCategoryMap(items, resp?.aiCategories);
-    if (aiMap) {
-      console.log("[FE] applying AI categories from backend");
-    } else {
-      console.log("[FE] applying fallback categories");
-    }
+    console.log("[FE] applying AI categories from backend");
     setCategorizedItems((prev) =>
       prev.map((item, idx) => ({
         ...item,
-        category: aiMap?.get(idx) || guessCategory(item?.name),
+        category: aiMap?.get(idx) || "",
       })),
     );
   }
@@ -220,14 +170,14 @@ export default function App() {
       name: item?.name || "-",
       quantity: Number(item?.quantity) || 0,
       price: Number(item?.price) || 0,
-      category: item?.category || "Iné",
+      category: item?.category || UNCATEGORIZED_LABEL,
     }));
     const entry = {
       id: `${Date.now()}`,
       createdAt: new Date().toISOString(),
       issueDate: receipt?.issueDate || null,
       storeName: organization?.name || "Neznámy obchod",
-      storeGroup: storeGroup || guessStoreGroup(organization?.name) || "Iné",
+      storeGroup: storeGroup || guessStoreGroup(organization?.name) || UNCATEGORIZED_LABEL,
       totalPrice: Number(totalPrice) || entryItems.reduce((sum, item) => sum + (Number(item.price) || 0), 0),
       notes: notes.trim(),
       items: entryItems,
@@ -271,6 +221,9 @@ export default function App() {
         setResp({ ok: false, ...data });
       } else {
         console.log("[FE] backend success", { cached: data?.cached, aiCategories: data?.aiCategories?.length || 0 });
+        console.log("[FE] AI request payload", data?.aiDebug?.requestPayload || data?.aiDebug?.request || null);
+        console.log("[FE] AI response raw", data?.aiDebug?.rawResponse || data?.aiDebug?.raw || null);
+        console.log("[FE] AI parsed categories", data?.aiDebug?.parsed || data?.aiCategories || null);
         setResp(data);
       }
     } catch (e) {
@@ -385,25 +338,27 @@ export default function App() {
                     <span className={item?.price < 0 ? "negative" : ""}>{formatCurrency(item?.price)}</span>
                     <label className="category-field">
                       <span className="sr-only">Kategória pre {item?.name}</span>
-                      <select
-                        value={item?.category || "Iné"}
+                      <input
+                        type="text"
+                        list="category-suggestions"
+                        value={item?.category || ""}
                         onChange={(event) => onCategoryChange(idx, event.target.value)}
-                      >
-                        {CATEGORY_OPTIONS.map((category) => (
-                          <option value={category} key={category}>
-                            {category}
-                          </option>
-                        ))}
-                      </select>
+                        placeholder="AI kategória"
+                      />
                     </label>
                   </div>
                 ))}
+                <datalist id="category-suggestions">
+                  {[...new Set(categorizedItems.map((item) => item?.category).filter(Boolean))].map((category) => (
+                    <option value={category} key={category} />
+                  ))}
+                </datalist>
                 <div className="items-actions">
                   <button type="button" onClick={applyAutoCategories}>
                     AI pretriediť kategórie
                   </button>
                   <p className="muted">
-                    Kategórie sú odhadnuté cez AI z backendu (alebo fallback podľa názvu), môžeš ich upraviť ručne.
+                    Kategórie sú navrhnuté cez AI z backendu a môžeš ich upraviť ručne.
                   </p>
                 </div>
               </div>
