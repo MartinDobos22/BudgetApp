@@ -130,6 +130,11 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
   align-items: center;
 }
 
+.items-table--categories .items-head,
+.items-table--categories .items-row {
+  grid-template-columns: 2.3fr 0.7fr 0.6fr 0.8fr 1.2fr;
+}
+
 .items-head {
   font-weight: 600;
   color: #4a4f63;
@@ -148,6 +153,22 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
   text-align: left;
 }
 
+.category-field select {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #d6d9e4;
+  background: #fff;
+}
+
+.items-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+}
+
 .negative {
   color: #c0392b;
 }
@@ -156,6 +177,10 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
   display: grid;
   gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.summary-grid--tight {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
 }
 
 .summary-value {
@@ -189,3 +214,89 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .footer { margin-top: 10px; }
 code { background: #f0f2f7; padding: 2px 6px; border-radius: 8px; }
+
+.history-form {
+  display: grid;
+  gap: 12px;
+}
+
+.history-form label {
+  display: grid;
+  gap: 6px;
+  text-align: left;
+}
+
+.history-form input {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #d6d9e4;
+}
+
+.field-label {
+  font-weight: 600;
+  color: #4a4f63;
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.summary-table {
+  display: grid;
+  gap: 8px;
+}
+
+.summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 10px;
+  background: #f7f8fc;
+  border-radius: 10px;
+  border: 1px solid #e6e8ef;
+}
+
+.summary-amount {
+  font-weight: 600;
+}
+
+.history-list {
+  display: grid;
+  gap: 12px;
+}
+
+.history-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid #e6e8ef;
+  background: #fff;
+}
+
+.history-card h5 {
+  margin: 4px 0;
+  font-size: 18px;
+}
+
+.history-total {
+  font-weight: 700;
+  font-size: 18px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
