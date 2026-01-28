@@ -88,7 +88,6 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [storeGroup, setStoreGroup] = useState("");
   const [notes, setNotes] = useState("");
-  const [aiCategories, setAiCategories] = useState(null);
 
   const prettyJson = useMemo(() => {
     if (!resp) return "";
@@ -149,22 +148,17 @@ export default function App() {
       setCategorizedItems([]);
       setStoreGroup("");
       setNotes("");
-      setAiCategories(null);
       return;
     }
     const suggestedStore = guessStoreGroup(organization?.name);
     setStoreGroup((prev) => prev || suggestedStore);
-    const aiMap = new Map((resp?.aiCategories || []).map((entry) => [entry?.name, entry?.category]));
-    const nextItems = items.map((item) => {
-      const aiCategory = aiMap.get(item?.name);
-      return {
+    setCategorizedItems(
+      items.map((item) => ({
         ...item,
-        category: aiCategory || guessCategory(item?.name),
-      };
-    });
-    setAiCategories(resp?.aiCategories || null);
-    setCategorizedItems(nextItems);
-  }, [receipt, organization?.name, items, resp?.aiCategories]);
+        category: guessCategory(item?.name),
+      })),
+    );
+  }, [receipt, organization?.name, items]);
 
   function formatCurrency(value) {
     if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
@@ -183,16 +177,6 @@ export default function App() {
   }
 
   function applyAutoCategories() {
-    if (aiCategories?.length) {
-      const aiMap = new Map(aiCategories.map((entry) => [entry?.name, entry?.category]));
-      setCategorizedItems((prev) =>
-        prev.map((item) => ({
-          ...item,
-          category: aiMap.get(item?.name) || guessCategory(item?.name),
-        })),
-      );
-      return;
-    }
     setCategorizedItems((prev) =>
       prev.map((item) => ({
         ...item,
@@ -380,10 +364,10 @@ export default function App() {
                 ))}
                 <div className="items-actions">
                   <button type="button" onClick={applyAutoCategories}>
-                    Použiť AI kategórie
+                    AI pretriediť kategórie
                   </button>
                   <p className="muted">
-                    Kategórie prídu z backendu cez OpenAI. Ak nie sú dostupné, použije sa lokálny odhad.
+                    Kategórie sú odhadnuté podľa názvu položky, môžeš ich upraviť ručne.
                   </p>
                 </div>
               </div>
