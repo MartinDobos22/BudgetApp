@@ -480,7 +480,7 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
     const cached = cacheGet(cacheKey);
     if (cached) {
       logStep("receipt", "Cache hit", { requestId });
-      const aiResult = await categorizeItemsWithOpenAI(cached);
+      const aiResult = await categorizeItemsWithOpenAI(cached, { OPENAI_API_KEY, OPENAI_MODEL, logStep });
       logStep("receipt", "Returning cached response", { requestId });
       return res.json({
         ok: true,
@@ -498,7 +498,7 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
     logStep("receipt", "FS response received", { requestId });
     cacheSet(cacheKey, fsJson);
 
-    const aiResult = await categorizeItemsWithOpenAI(fsJson);
+    const aiResult = await categorizeItemsWithOpenAI(fsJson, { OPENAI_API_KEY, OPENAI_MODEL, logStep });
     logStep("receipt", "Returning response", { requestId, aiCategories: aiResult?.categories?.length || 0 });
     res.json({
       ok: true,
