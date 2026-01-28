@@ -75,5 +75,117 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
   color: #8b0000;
 }
 
+.receipt {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.receipt-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.receipt-header h3 {
+  margin: 4px 0;
+  font-size: 22px;
+}
+
+.receipt-total {
+  text-align: right;
+  min-width: 220px;
+}
+
+.total-amount {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.receipt-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #f7f8fc;
+  border: 1px solid #e6e8ef;
+}
+
+.receipt-section h4 {
+  margin: 0 0 10px 0;
+}
+
+.items-table {
+  display: grid;
+  gap: 6px;
+}
+
+.items-head,
+.items-row {
+  display: grid;
+  grid-template-columns: 2.5fr 0.8fr 0.8fr 1fr;
+  gap: 12px;
+  align-items: center;
+}
+
+.items-head {
+  font-weight: 600;
+  color: #4a4f63;
+  border-bottom: 1px solid #e6e8ef;
+  padding-bottom: 8px;
+}
+
+.items-row {
+  background: #fff;
+  border: 1px solid #eef0f5;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.item-name {
+  text-align: left;
+}
+
+.negative {
+  color: #c0392b;
+}
+
+.summary-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.summary-value {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.mono {
+  font-family: "SFMono-Regular", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  word-break: break-all;
+}
+
+.vat-summary h5 {
+  margin: 12px 0 8px;
+}
+
+.vat-table .items-head,
+.vat-table .items-row {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.raw-json {
+  border-top: 1px dashed #d6d9e4;
+  padding-top: 12px;
+}
+
+.raw-json summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
 .footer { margin-top: 10px; }
 code { background: #f0f2f7; padding: 2px 6px; border-radius: 8px; }
