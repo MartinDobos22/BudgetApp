@@ -10,6 +10,11 @@ app.use(cors());
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
+function logStep(scope, message, meta = {}) {
+  const payload = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : "";
+  console.log(`[${scope}] ${message}${payload}`);
+}
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
@@ -243,9 +248,25 @@ const CATEGORY_OPTIONS = [
   "Iné",
 ];
 
+function extractJsonFromOpenAI(content) {
+  const trimmed = String(content || "").trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("```")) {
+    const match = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    return match ? match[1].trim() : trimmed.replace(/```/g, "").trim();
+  }
+  return trimmed;
+}
+
 async function categorizeItemsWithOpenAI(items) {
-  if (!OPENAI_API_KEY) return null;
-  if (!Array.isArray(items) || items.length === 0) return [];
+  if (!OPENAI_API_KEY) {
+    logStep("ai", "OPENAI_API_KEY missing, skipping categorization");
+    return null;
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    logStep("ai", "No items to categorize");
+    return [];
+  }
 
   const payload = {
     model: OPENAI_MODEL,
@@ -272,6 +293,7 @@ async function categorizeItemsWithOpenAI(items) {
     ],
   };
 
+  logStep("ai", "Sending categorize request", { items: items.length, model: OPENAI_MODEL });
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -284,21 +306,25 @@ async function categorizeItemsWithOpenAI(items) {
   const data = await resp.json();
   if (!resp.ok) {
     console.warn("OpenAI categorize failed:", data?.error || data);
+    logStep("ai", "Categorize failed", { status: resp.status });
     return null;
   }
 
   const content = data?.choices?.[0]?.message?.content;
   if (!content) return null;
   try {
-    const parsed = JSON.parse(content);
-    if (!Array.isArray(parsed)) return null;
-    const byId = new Map(parsed.map((entry) => [entry?.id, entry?.category]));
+    const parsed = JSON.parse(extractJsonFromOpenAI(content));
+    const list = Array.isArray(parsed) ? parsed : parsed?.results;
+    if (!Array.isArray(list)) return null;
+    const byId = new Map(list.map((entry) => [entry?.id, entry?.category]));
+    logStep("ai", "Categorize success", { categories: list.length });
     return items.map((item, idx) => ({
       name: item?.name || "",
       category: byId.get(idx) || "Iné",
     }));
   } catch (e) {
     console.warn("OpenAI categorize parse failed:", e?.message || e);
+    logStep("ai", "Categorize parse failed", { error: e?.message || String(e) });
     return null;
   }
 }
@@ -315,24 +341,32 @@ app.get("/api/health", (req, res) => {
  * Return: { ok:true, qrText, lookup, fsJson }
  */
 app.post("/api/receipt", upload.single("image"), async (req, res) => {
+  const requestId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  logStep("receipt", "Incoming request", { requestId });
   try {
     if (!req.file) {
+      logStep("receipt", "Missing file", { requestId });
       return res.status(400).json({ ok: false, error: "Chýba súbor. Pošli ho ako field 'image'." });
     }
 
+    logStep("receipt", "Decoding QR", { requestId, fileSize: req.file.size });
     const qrText = await decodeQrFromBuffer(req.file.buffer);
     if (!qrText) {
+      logStep("receipt", "QR decode failed", { requestId });
       return res.status(422).json({
         ok: false,
         error: "Nepodarilo sa prečítať QR z fotky. Skús ostrejšiu fotku / viac svetla / priblížiť QR.",
       });
     }
 
+    logStep("receipt", "QR decoded", { requestId, qrText });
     const lookup = buildLookupPayload(qrText);
     if (!lookup) {
+      logStep("receipt", "Unsupported QR format", { requestId, qrText });
       return res.status(422).json({ ok: false, error: "Neznámy formát QR (ani online O-..., ani offline s ':').", qrText });
     }
 
+    logStep("receipt", "Lookup payload ready", { requestId, type: lookup.type });
     // cache key: online id alebo offline zlepený payload
     const cacheKey =
       lookup.type === "online"
@@ -341,17 +375,23 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
 
     const cached = cacheGet(cacheKey);
     if (cached) {
+      logStep("receipt", "Cache hit", { requestId });
       const aiCategories = await categorizeItemsWithOpenAI(cached?.receipt?.items || []);
+      logStep("receipt", "Returning cached response", { requestId });
       return res.json({ ok: true, qrText, lookup, fsJson: cached, cached: true, aiCategories });
     }
 
+    logStep("receipt", "Fetching receipt from FS", { requestId });
     const fsJson = await fetchReceiptFromFS(lookup.payload);
+    logStep("receipt", "FS response received", { requestId });
     cacheSet(cacheKey, fsJson);
 
     const aiCategories = await categorizeItemsWithOpenAI(fsJson?.receipt?.items || []);
+    logStep("receipt", "Returning response", { requestId, aiCategories: aiCategories?.length || 0 });
     res.json({ ok: true, qrText, lookup, fsJson, cached: false, aiCategories });
   } catch (e) {
     console.error(e);
+    logStep("receipt", "Unhandled error", { requestId, error: e?.message || String(e) });
     res.status(e.status || 500).json({
       ok: false,
       error: e?.message || String(e),

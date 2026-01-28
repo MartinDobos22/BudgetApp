@@ -79,6 +79,21 @@ function guessStoreGroup(name) {
   return match?.label || "";
 }
 
+function buildAiCategoryMap(items, aiCategories) {
+  if (!Array.isArray(aiCategories) || aiCategories.length === 0) return null;
+  if (aiCategories.length === items.length) {
+    return new Map(aiCategories.map((entry, idx) => [idx, entry?.category || "Iné"]));
+  }
+  const byName = new Map();
+  aiCategories.forEach((entry) => {
+    const key = normalizeText(entry?.name);
+    if (key && !byName.has(key)) {
+      byName.set(key, entry?.category || "Iné");
+    }
+  });
+  return new Map(items.map((item, idx) => [idx, byName.get(normalizeText(item?.name))]));
+}
+
 export default function App() {
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -145,6 +160,7 @@ export default function App() {
 
   useEffect(() => {
     if (!receipt) {
+      console.log("[FE] receipt reset");
       setCategorizedItems([]);
       setStoreGroup("");
       setNotes("");
@@ -152,13 +168,19 @@ export default function App() {
     }
     const suggestedStore = guessStoreGroup(organization?.name);
     setStoreGroup((prev) => prev || suggestedStore);
+    const aiMap = buildAiCategoryMap(items, resp?.aiCategories);
+    if (aiMap) {
+      console.log("[FE] using AI categories", { items: items.length, ai: resp?.aiCategories?.length || 0 });
+    } else {
+      console.log("[FE] using fallback category rules", { items: items.length });
+    }
     setCategorizedItems(
-      items.map((item) => ({
+      items.map((item, idx) => ({
         ...item,
-        category: guessCategory(item?.name),
+        category: aiMap?.get(idx) || guessCategory(item?.name),
       })),
     );
-  }, [receipt, organization?.name, items]);
+  }, [receipt, organization?.name, items, resp?.aiCategories]);
 
   function formatCurrency(value) {
     if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
@@ -177,16 +199,23 @@ export default function App() {
   }
 
   function applyAutoCategories() {
+    const aiMap = buildAiCategoryMap(items, resp?.aiCategories);
+    if (aiMap) {
+      console.log("[FE] applying AI categories from backend");
+    } else {
+      console.log("[FE] applying fallback categories");
+    }
     setCategorizedItems((prev) =>
-      prev.map((item) => ({
+      prev.map((item, idx) => ({
         ...item,
-        category: guessCategory(item?.name),
+        category: aiMap?.get(idx) || guessCategory(item?.name),
       })),
     );
   }
 
   function saveToHistory() {
     if (!receipt) return;
+    console.log("[FE] saving receipt to history", { items: categorizedItems.length });
     const entryItems = categorizedItems.map((item) => ({
       name: item?.name || "-",
       quantity: Number(item?.quantity) || 0,
@@ -207,11 +236,13 @@ export default function App() {
   }
 
   function clearHistory() {
+    console.log("[FE] clearing history");
     setHistory([]);
   }
 
   function onPickFile(e) {
     const f = e.target.files?.[0] || null;
+    console.log("[FE] file selected", { name: f?.name, size: f?.size });
     setFile(f);
     setResp(null);
 
@@ -223,6 +254,7 @@ export default function App() {
     if (!file) return;
     setBusy(true);
     setResp(null);
+    console.log("[FE] sending receipt to backend");
 
     try {
       const fd = new FormData();
@@ -235,13 +267,17 @@ export default function App() {
 
       const data = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
       if (!r.ok) {
+        console.log("[FE] backend error", data);
         setResp({ ok: false, ...data });
       } else {
+        console.log("[FE] backend success", { cached: data?.cached, aiCategories: data?.aiCategories?.length || 0 });
         setResp(data);
       }
     } catch (e) {
+      console.log("[FE] request failed", e);
       setResp({ ok: false, error: e?.message || String(e) });
     } finally {
+      console.log("[FE] request finished");
       setBusy(false);
     }
   }
@@ -367,7 +403,7 @@ export default function App() {
                     AI pretriediť kategórie
                   </button>
                   <p className="muted">
-                    Kategórie sú odhadnuté podľa názvu položky, môžeš ich upraviť ručne.
+                    Kategórie sú odhadnuté cez AI z backendu (alebo fallback podľa názvu), môžeš ich upraviť ručne.
                   </p>
                 </div>
               </div>
