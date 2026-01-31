@@ -2,6 +2,17 @@
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
+## QR decoding (server)
+
+The backend first tries local QR preprocessing. If you set `GOOGLE_VISION_API_KEY`, it will fall back to Google Cloud Vision's `TEXT_DETECTION` when local decoding fails.
+
+1. Create a Google Cloud Vision API key.
+2. Set the environment variable:
+   ```bash
+   export GOOGLE_VISION_API_KEY="your-key"
+   ```
+3. Start the server as usual (`npm run dev` or `npm start`).
+
 Currently, two official plugins are available:
 
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh

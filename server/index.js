@@ -43,6 +43,7 @@ app.use(cors());
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+const GOOGLE_VISION_API_KEY = process.env.GOOGLE_VISION_API_KEY;
 
 function logStep(scope, message, meta = {}) {
   const payload = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : "";
@@ -67,6 +68,55 @@ function decodeWithQrReader(jimpImage) {
   });
 }
 
+function applyThreshold(jimpImage, threshold = 170) {
+  const { data, width, height } = jimpImage.bitmap;
+  jimpImage.scan(0, 0, width, height, (x, y, idx) => {
+    const r = data[idx];
+    const g = data[idx + 1];
+    const b = data[idx + 2];
+    const v = (r + g + b) / 3;
+    const t = v >= threshold ? 255 : 0;
+    data[idx] = t;
+    data[idx + 1] = t;
+    data[idx + 2] = t;
+  });
+  return jimpImage;
+}
+
+async function decodeWithGoogleVision(buffer) {
+  if (!GOOGLE_VISION_API_KEY) return null;
+
+  try {
+    const resp = await fetchWithTimeout(
+      `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requests: [
+            {
+              image: { content: buffer.toString("base64") },
+              features: [{ type: "TEXT_DETECTION" }],
+            },
+          ],
+        }),
+      },
+      12000,
+    );
+
+    if (!resp.ok) {
+      return null;
+    }
+
+    const payload = await resp.json();
+    const annotation = payload?.responses?.[0]?.textAnnotations?.[0]?.description;
+    if (!annotation) return null;
+    return String(annotation).trim();
+  } catch (err) {
+    return null;
+  }
+}
+
 /**
  * Skúša viac preprocessing variantov, aby to fungovalo aj na horších fotkách.
  * Vracia dekódovaný text alebo null.
@@ -80,6 +130,11 @@ async function decodeQrFromBuffer(buffer) {
     () => img.clone().greyscale().invert().contrast(0.4).normalize(),
     () => img.clone().greyscale().resize(900, Jimp.AUTO).contrast(0.4).normalize(),
     () => img.clone().greyscale().resize(1400, Jimp.AUTO).contrast(0.6).normalize(),
+    () => img.clone().greyscale().resize(1800, Jimp.AUTO).contrast(0.8).normalize(),
+    () => applyThreshold(img.clone().greyscale().normalize(), 160),
+    () => applyThreshold(img.clone().greyscale().normalize(), 200),
+    () => applyThreshold(img.clone().greyscale().resize(1600, Jimp.AUTO).normalize(), 170),
+    () => applyThreshold(img.clone().greyscale().resize(2000, Jimp.AUTO).normalize(), 190),
   ];
 
   for (const make of variants) {
@@ -88,6 +143,11 @@ async function decodeQrFromBuffer(buffer) {
       if (text) return text;
     } catch {}
   }
+
+  if (GOOGLE_VISION_API_KEY) {
+    return decodeWithGoogleVision(buffer);
+  }
+
   return null;
 }
 
