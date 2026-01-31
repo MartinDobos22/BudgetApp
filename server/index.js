@@ -121,31 +121,48 @@ async function decodeWithGoogleVision(buffer) {
  * Skúša viac preprocessing variantov, aby to fungovalo aj na horších fotkách.
  * Vracia dekódovaný text alebo null.
  */
+function replaceDigitishCharacters(value) {
+  return String(value || "").replace(/[OIlSBE]/gi, (char) => {
+    const normalized = char.toLowerCase();
+    if (normalized === "o") return "0";
+    if (normalized === "i" || normalized === "l") return "1";
+    if (normalized === "s") return "5";
+    if (normalized === "b") return "8";
+    if (normalized === "e") return "6";
+    return char;
+  });
+}
+
 async function decodeQrFromBuffer(buffer) {
   const img = await Jimp.read(buffer);
 
   const variants = [
-    () => img.clone(),
-    () => img.clone().greyscale().contrast(0.4).normalize(),
-    () => img.clone().greyscale().invert().contrast(0.4).normalize(),
-    () => img.clone().greyscale().resize(900, Jimp.AUTO).contrast(0.4).normalize(),
-    () => img.clone().greyscale().resize(1400, Jimp.AUTO).contrast(0.6).normalize(),
-    () => img.clone().greyscale().resize(1800, Jimp.AUTO).contrast(0.8).normalize(),
-    () => applyThreshold(img.clone().greyscale().normalize(), 160),
-    () => applyThreshold(img.clone().greyscale().normalize(), 200),
-    () => applyThreshold(img.clone().greyscale().resize(1600, Jimp.AUTO).normalize(), 170),
-    () => applyThreshold(img.clone().greyscale().resize(2000, Jimp.AUTO).normalize(), 190),
+    { label: "orig", make: () => img.clone() },
+    { label: "gray-contrast", make: () => img.clone().greyscale().contrast(0.4).normalize() },
+    { label: "gray-invert", make: () => img.clone().greyscale().invert().contrast(0.4).normalize() },
+    { label: "resize-900", make: () => img.clone().greyscale().resize(900, Jimp.AUTO).contrast(0.4).normalize() },
+    { label: "resize-1400", make: () => img.clone().greyscale().resize(1400, Jimp.AUTO).contrast(0.6).normalize() },
+    { label: "resize-1800", make: () => img.clone().greyscale().resize(1800, Jimp.AUTO).contrast(0.8).normalize() },
+    { label: "resize-2400", make: () => img.clone().greyscale().resize(2400, Jimp.AUTO).contrast(0.8).normalize() },
+    { label: "threshold-160", make: () => applyThreshold(img.clone().greyscale().normalize(), 160) },
+    { label: "threshold-200", make: () => applyThreshold(img.clone().greyscale().normalize(), 200) },
+    { label: "threshold-1600", make: () => applyThreshold(img.clone().greyscale().resize(1600, Jimp.AUTO).normalize(), 170) },
+    { label: "threshold-2000", make: () => applyThreshold(img.clone().greyscale().resize(2000, Jimp.AUTO).normalize(), 190) },
+    { label: "rotate-90", make: () => img.clone().rotate(90).greyscale().contrast(0.4).normalize() },
+    { label: "rotate-180", make: () => img.clone().rotate(180).greyscale().contrast(0.4).normalize() },
+    { label: "rotate-270", make: () => img.clone().rotate(270).greyscale().contrast(0.4).normalize() },
   ];
 
-  for (const make of variants) {
+  for (const variant of variants) {
     try {
-      const text = await decodeWithQrReader(make());
-      if (text) return text;
+      const text = await decodeWithQrReader(variant.make());
+      if (text) return { text, source: "qr", variant: variant.label };
     } catch {}
   }
 
   if (GOOGLE_VISION_API_KEY) {
-    return decodeWithGoogleVision(buffer);
+    const text = await decodeWithGoogleVision(buffer);
+    if (text) return { text, source: "ocr", variant: "google_vision" };
   }
 
   return null;
@@ -216,41 +233,116 @@ console.log("OPD URL:", OPD_URL);
  * Rozpozná, či QR je online (O-...) alebo offline (5 častí oddelených ':')
  * a vráti payload pre OPD endpoint.
  */
-function buildLookupPayload(qrTextRaw) {
-  const qrText = stripControlChars(qrTextRaw);
+function parseOfflinePayloadFromColonText(qrText) {
+  const parts = qrText.split(":").map((p) => p.trim());
+  if (parts.length !== 5) return null;
 
-  // ONLINE
-  const receiptId = extractOnlineReceiptIdFromAnything(qrText);
-  if (receiptId) {
-    return { type: "online", payload: { receiptId } };
+  const [okp, cashRegisterCode, compactDate, receiptNumber, totalAmount] = parts;
+  const issueDateFormatted = formatCompactDate(compactDate);
+  if (!issueDateFormatted) return null;
+
+  const rn = parseNumberStrict(receiptNumber);
+  const ta = parseNumberStrict(totalAmount);
+  if (!okp || !cashRegisterCode || rn === null || ta === null) return null;
+
+  return {
+    okp,
+    cashRegisterCode,
+    issueDateFormatted,
+    receiptNumber: rn,
+    totalAmount: ta,
+  };
+}
+
+function extractOfflinePayloadFromText(qrText) {
+  const lines = qrText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const okpMatch = qrText.match(/[A-F0-9]{8}(?:-[A-F0-9]{8}){4}/i);
+  const okp = okpMatch?.[0] || null;
+
+  const cashLine =
+    lines.find((line) => /pokladn|pokladnic|pokladna|cash register/i.test(line)) ||
+    lines.find((line) => /\d{6,}/.test(line));
+  const cashMatch = cashLine?.match(/[0-9 ]{6,}/);
+  const cashRegisterCode = cashMatch ? cashMatch[0].replace(/\s+/g, "") : null;
+
+  const normalizedText = replaceDigitishCharacters(qrText);
+  const dateMatch = normalizedText.match(/(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2}:\d{2})/);
+  const issueDateFormatted = dateMatch ? `${dateMatch[1]} ${dateMatch[2]}` : null;
+
+  let receiptNumber = null;
+  const receiptLine = lines.find((line) => /doklad|blocek|blok|receipt|cislo|č\./i.test(line));
+  if (receiptLine) {
+    const receiptMatch = replaceDigitishCharacters(receiptLine).match(/\d{1,}/);
+    receiptNumber = receiptMatch ? Number(receiptMatch[0]) : null;
   }
 
-  // OFFLINE: okp:cashRegisterCode:YYMMDDhhmmss:receiptNumber:totalAmount
-  const parts = qrText.split(":").map((p) => p.trim());
-  if (parts.length === 5) {
-    const [okp, cashRegisterCode, compactDate, receiptNumber, totalAmount] = parts;
+  let totalAmount = null;
+  const totalIndex = lines.findIndex((line) => /suma|celkom|spolu|total/i.test(line));
+  if (totalIndex >= 0) {
+    const candidateLines = lines.slice(totalIndex, totalIndex + 4);
+    const numbers = candidateLines
+      .flatMap((line) => (replaceDigitishCharacters(line).match(/\d+(?:[.,]\d{1,2})?/g) || []))
+      .map(parseNumberStrict)
+      .filter((value) => value !== null);
+    if (numbers.length) {
+      totalAmount = numbers[numbers.length - 1];
+    }
+  }
 
-    const issueDateFormatted = formatCompactDate(compactDate);
-    if (!issueDateFormatted) return null;
-
-    const rn = parseNumberStrict(receiptNumber);
-    const ta = parseNumberStrict(totalAmount);
-
-    if (!okp || !cashRegisterCode || !issueDateFormatted || rn === null || ta === null) return null;
-
+  if (!okp || !cashRegisterCode || !issueDateFormatted || receiptNumber === null || totalAmount === null) {
     return {
-      type: "offline",
-      payload: {
+      payload: null,
+      debug: {
         okp,
         cashRegisterCode,
         issueDateFormatted,
-        receiptNumber: rn,
-        totalAmount: ta,
+        receiptNumber,
+        totalAmount,
+        linesSample: lines.slice(0, 8),
       },
     };
   }
 
-  return null;
+  return {
+    payload: {
+      okp,
+      cashRegisterCode,
+      issueDateFormatted,
+      receiptNumber,
+      totalAmount,
+    },
+    debug: null,
+  };
+}
+
+function buildLookupPayload(qrTextRaw) {
+  const qrText = stripControlChars(qrTextRaw);
+  const debug = {
+    normalizedPreview: qrText.slice(0, 160),
+  };
+
+  // ONLINE
+  const receiptId = extractOnlineReceiptIdFromAnything(qrText);
+  if (receiptId) {
+    return { lookup: { type: "online", payload: { receiptId } }, debug: { ...debug, strategy: "online" } };
+  }
+
+  // OFFLINE: okp:cashRegisterCode:YYMMDDhhmmss:receiptNumber:totalAmount
+  const offline = parseOfflinePayloadFromColonText(qrText);
+  if (offline) {
+    return { lookup: { type: "offline", payload: offline }, debug: { ...debug, strategy: "offline_colon" } };
+  }
+
+  const extracted = extractOfflinePayloadFromText(qrText);
+  if (extracted?.payload) {
+    return { lookup: { type: "offline", payload: extracted.payload }, debug: { ...debug, strategy: "offline_text" } };
+  }
+
+  return { lookup: null, debug: { ...debug, strategy: "unsupported", extracted: extracted?.debug || null } };
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
@@ -513,9 +605,9 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
       return res.status(400).json({ ok: false, error: "Chýba súbor. Pošli ho ako field 'image'." });
     }
 
-    logStep("receipt", "Decoding QR", { requestId, fileSize: req.file.size });
-    const qrText = await decodeQrFromBuffer(req.file.buffer);
-    if (!qrText) {
+    logStep("receipt", "Decoding QR", { requestId, fileSize: req.file.size, fileType: req.file.mimetype });
+    const qrResult = await decodeQrFromBuffer(req.file.buffer);
+    if (!qrResult?.text) {
       logStep("receipt", "QR decode failed", { requestId });
       return res.status(422).json({
         ok: false,
@@ -523,14 +615,30 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
       });
     }
 
-    logStep("receipt", "QR decoded", { requestId, qrText });
-    const lookup = buildLookupPayload(qrText);
+    const qrText = qrResult.text;
+    logStep("receipt", "QR decoded", {
+      requestId,
+      source: qrResult.source,
+      variant: qrResult.variant,
+      textLength: qrText.length,
+      preview: qrText.slice(0, 120),
+    });
+    const { lookup, debug: lookupDebug } = buildLookupPayload(qrText);
     if (!lookup) {
-      logStep("receipt", "Unsupported QR format", { requestId, qrText });
-      return res.status(422).json({ ok: false, error: "Neznámy formát QR (ani online O-..., ani offline s ':').", qrText });
+      logStep("receipt", "Unsupported QR format", { requestId, lookupDebug });
+      return res.status(422).json({
+        ok: false,
+        error:
+          qrResult.source === "ocr"
+            ? "QR sa nepodarilo dekódovať. OCR našlo len text, ale nenašli sa údaje pre OPD."
+            : "Neznámy formát QR (ani online O-..., ani offline s ':').",
+        qrText,
+        qrMeta: { source: qrResult.source, variant: qrResult.variant },
+        lookupDebug,
+      });
     }
 
-    logStep("receipt", "Lookup payload ready", { requestId, type: lookup.type });
+    logStep("receipt", "Lookup payload ready", { requestId, type: lookup.type, strategy: lookupDebug?.strategy });
     // cache key: online id alebo offline zlepený payload
     const cacheKey =
       lookup.type === "online"
@@ -545,7 +653,9 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
       return res.json({
         ok: true,
         qrText,
+        qrMeta: { source: qrResult.source, variant: qrResult.variant },
         lookup,
+        lookupDebug,
         fsJson: cached,
         cached: true,
         aiCategories: aiResult?.categories || null,
@@ -563,7 +673,9 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
     res.json({
       ok: true,
       qrText,
+      qrMeta: { source: qrResult.source, variant: qrResult.variant },
       lookup,
+      lookupDebug,
       fsJson,
       cached: false,
       aiCategories: aiResult?.categories || null,

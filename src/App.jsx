@@ -222,7 +222,14 @@ export default function App() {
     if (!file) return;
     setBusy(true);
     setResp(null);
-    console.log("[FE] sending receipt to backend");
+    const requestId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    const startedAt = performance.now();
+    console.log("[FE] sending receipt to backend", {
+      requestId,
+      name: file?.name,
+      size: file?.size,
+      type: file?.type,
+    });
 
     try {
       const fd = new FormData();
@@ -234,6 +241,14 @@ export default function App() {
       });
 
       const data = await r.json().catch(() => ({ ok: false, error: `HTTP ${r.status}` }));
+      console.log("[FE] backend response", {
+        requestId,
+        ok: r.ok,
+        status: r.status,
+        durationMs: Math.round(performance.now() - startedAt),
+        qrMeta: data?.qrMeta || null,
+        lookupStrategy: data?.lookupDebug?.strategy || null,
+      });
       if (!r.ok) {
         console.log("[FE] backend error", data);
         setResp({ ok: false, ...data });
@@ -248,7 +263,7 @@ export default function App() {
       console.log("[FE] request failed", e);
       setResp({ ok: false, error: e?.message || String(e) });
     } finally {
-      console.log("[FE] request finished");
+      console.log("[FE] request finished", { requestId });
       setBusy(false);
     }
   }
