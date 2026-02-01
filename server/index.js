@@ -5,6 +5,7 @@ import cors from "cors";
 import multer from "multer";
 import Jimp from "jimp";
 import QrCode from "qrcode-reader";
+import jsQR from "jsqr";
 
 function loadEnvFile(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -91,6 +92,46 @@ function applySharpen(jimpImage) {
   ]);
 }
 
+function findQrRoi(jimpImage) {
+  const { data, width, height } = jimpImage.bitmap;
+  const clamped = new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
+  const result = jsQR(clamped, width, height);
+  if (!result?.location) return null;
+
+  const points = [
+    result.location.topLeftCorner,
+    result.location.topRightCorner,
+    result.location.bottomRightCorner,
+    result.location.bottomLeftCorner,
+  ];
+
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const minX = Math.max(0, Math.floor(Math.min(...xs)));
+  const minY = Math.max(0, Math.floor(Math.min(...ys)));
+  const maxX = Math.min(width, Math.ceil(Math.max(...xs)));
+  const maxY = Math.min(height, Math.ceil(Math.max(...ys)));
+
+  let x = minX;
+  let y = minY;
+  let w = maxX - minX;
+  let h = maxY - minY;
+
+  if (w <= 0 || h <= 0) return null;
+
+  const padX = Math.round(w * 0.12);
+  const padY = Math.round(h * 0.12);
+
+  x = Math.max(0, x - padX);
+  y = Math.max(0, y - padY);
+  w = Math.min(width - x, w + padX * 2);
+  h = Math.min(height - y, h + padY * 2);
+
+  if (w <= 0 || h <= 0) return null;
+
+  return { x, y, w, h };
+}
+
 async function decodeWithGoogleVision(buffer) {
   if (!GOOGLE_VISION_API_KEY) return null;
 
@@ -143,6 +184,28 @@ function replaceDigitishCharacters(value) {
 
 async function decodeQrFromBuffer(buffer) {
   const img = await Jimp.read(buffer);
+  const roiDetectionImage = img.clone().greyscale().normalize();
+  const roi = findQrRoi(roiDetectionImage);
+
+  if (roi) {
+    logStep("qr", "ROI detected for QR decode", roi);
+    const roiImg = img.clone().crop(roi.x, roi.y, roi.w, roi.h);
+    const roiVariants = [
+      { label: "roi-orig", make: () => roiImg.clone() },
+      { label: "roi-gray-contrast", make: () => roiImg.clone().greyscale().contrast(0.4).normalize() },
+      { label: "roi-gray-sharpen", make: () => applySharpen(roiImg.clone().greyscale().normalize()) },
+      { label: "roi-threshold-170", make: () => applyThreshold(roiImg.clone().greyscale().normalize(), 170) },
+    ];
+
+    for (const variant of roiVariants) {
+      try {
+        const text = await decodeWithQrReader(variant.make());
+        if (text) return { text, source: "qr", variant: variant.label };
+      } catch {}
+    }
+  } else {
+    logStep("qr", "ROI not found for QR decode");
+  }
 
   const variants = [
     { label: "orig", make: () => img.clone() },
