@@ -633,10 +633,12 @@ function extractOfflinePayloadFromText(qrText) {
   };
 }
 
-function buildLookupPayload(qrTextRaw) {
+function buildLookupPayload(qrTextRaw, { includeExtracted = false } = {}) {
   const qrText = stripControlChars(qrTextRaw, { preserveNewlines: true });
+  const extracted = includeExtracted ? extractOfflinePayloadFromText(qrText) : null;
   const debug = {
     normalizedPreview: qrText.replace(/\s+/g, " ").slice(0, 160),
+    extracted: extracted?.debug || null,
   };
 
   // ONLINE
@@ -651,12 +653,18 @@ function buildLookupPayload(qrTextRaw) {
     return { lookup: { type: "offline", payload: offline }, debug: { ...debug, strategy: "offline_colon" } };
   }
 
-  const extracted = extractOfflinePayloadFromText(qrText);
-  if (extracted?.payload) {
-    return { lookup: { type: "offline", payload: extracted.payload }, debug: { ...debug, strategy: "offline_text" } };
+  const extractedFromText = extracted || extractOfflinePayloadFromText(qrText);
+  if (extractedFromText?.payload) {
+    return {
+      lookup: { type: "offline", payload: extractedFromText.payload },
+      debug: { ...debug, strategy: "offline_text", extracted: extractedFromText?.debug || null },
+    };
   }
 
-  return { lookup: null, debug: { ...debug, strategy: "unsupported", extracted: extracted?.debug || null } };
+  return {
+    lookup: null,
+    debug: { ...debug, strategy: "unsupported", extracted: extractedFromText?.debug || null },
+  };
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
@@ -916,7 +924,11 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
   try {
     if (!req.file) {
       logStep("receipt", "Missing file", { requestId });
-      return res.status(400).json({ ok: false, error: "Chýba súbor. Pošli ho ako field 'image'." });
+      return res.status(400).json({
+        ok: false,
+        errorCode: "missing_image",
+        error: "Chýba súbor. Pošli ho ako field 'image'.",
+      });
     }
 
     logStep("receipt", "Decoding QR", { requestId, fileSize: req.file.size, fileType: req.file.mimetype });
@@ -925,6 +937,7 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
       logStep("receipt", "QR decode failed", { requestId });
       return res.status(422).json({
         ok: false,
+        errorCode: "qr_decode_failed",
         error: "Nepodarilo sa prečítať QR z fotky. Skús ostrejšiu fotku / viac svetla / priblížiť QR.",
       });
     }
@@ -937,13 +950,16 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
       textLength: qrText.length,
       preview: qrText.slice(0, 120),
     });
-    const { lookup, debug: lookupDebug } = buildLookupPayload(qrText);
+    const { lookup, debug: lookupDebug } = buildLookupPayload(qrText, {
+      includeExtracted: qrResult.source?.startsWith("ocr"),
+    });
     if (!lookup) {
       logStep("receipt", "Unsupported QR format", { requestId, lookupDebug });
       return res.status(422).json({
         ok: false,
+        errorCode: qrResult.source?.startsWith("ocr") ? "ocr_text_no_payload" : "unsupported_qr_format",
         error:
-          qrResult.source === "ocr"
+          qrResult.source?.startsWith("ocr")
             ? "QR sa nepodarilo dekódovať. OCR našlo len text, ale nenašli sa údaje pre OPD."
             : "Neznámy formát QR (ani online O-..., ani offline s ':').",
         qrText,
@@ -1000,6 +1016,7 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
     logStep("receipt", "Unhandled error", { requestId, error: e?.message || String(e) });
     res.status(e.status || 500).json({
       ok: false,
+      errorCode: "server_error",
       error: e?.message || String(e),
       details: e?.data || null,
     });

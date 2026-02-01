@@ -23,6 +23,13 @@ const STORE_GROUPS = [
 
 const STORAGE_KEY = "budgetapp-receipts-v1";
 
+const ERROR_TIPS = {
+  qr_decode_failed: "Priblíž QR, zvýš kontrast alebo pridaj viac svetla. Skús aj zmeniť uhol fotenia.",
+  ocr_text_no_payload: "Skús odfotiť QR viac zblízka, bez odleskov a s vyšším kontrastom.",
+  unsupported_qr_format: "Skontroluj, či je QR nepoškodený a skús inú fotku s lepším uhlom.",
+  missing_image: "Vyber obrázok bločku a nahraj ho znova.",
+};
+
 function normalizeText(value) {
   return String(value || "")
     .toLowerCase()
@@ -80,6 +87,22 @@ export default function App() {
     }
   }, [resp]);
 
+  const diagnosticsJson = useMemo(() => {
+    if (!resp) return "";
+    try {
+      return JSON.stringify(
+        {
+          qrMeta: resp?.qrMeta ?? null,
+          lookupDebug: resp?.lookupDebug ?? null,
+        },
+        null,
+        2,
+      );
+    } catch {
+      return String(resp);
+    }
+  }, [resp]);
+
   const receipt =
     resp?.fsJson?.receipt ??
     resp?.fsJson?.data?.receipt ??
@@ -93,6 +116,7 @@ export default function App() {
   const aiCategories = useMemo(() => resp?.aiCategories ?? [], [resp]);
   const totalPrice = receipt?.totalPrice ?? null;
   const totalItems = items.reduce((sum, item) => sum + (Number(item?.quantity) || 0), 0);
+  const errorTip = resp?.errorCode ? ERROR_TIPS[resp.errorCode] || null : null;
 
   const totalsByCategory = useMemo(() => {
     const totals = {};
@@ -313,6 +337,12 @@ export default function App() {
             <div>
               <strong>Chyba:</strong> {resp.error}
             </div>
+            {resp.errorCode && (
+              <div className="muted">
+                Kód: <code>{resp.errorCode}</code>
+              </div>
+            )}
+            {errorTip && <div className="muted">Tip: {errorTip}</div>}
             {resp.details && <pre className="pre">{JSON.stringify(resp.details, null, 2)}</pre>}
           </div>
         )}
@@ -491,6 +521,13 @@ export default function App() {
               <pre className="pre">{prettyJson}</pre>
             </details>
           </div>
+        )}
+
+        {resp && (
+          <details className="raw-json">
+            <summary>Zobraziť diagnostiku</summary>
+            <pre className="pre">{diagnosticsJson}</pre>
+          </details>
         )}
       </section>
 
