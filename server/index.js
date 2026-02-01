@@ -69,6 +69,13 @@ function decodeWithQrReader(jimpImage) {
   });
 }
 
+function decodeWithJsQr(jimpImage) {
+  const { data, width, height } = jimpImage.bitmap;
+  const clamped = new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
+  const result = jsQR(clamped, width, height);
+  return result?.data ? String(result.data) : null;
+}
+
 function applyThreshold(jimpImage, threshold = 170) {
   const { data, width, height } = jimpImage.bitmap;
   jimpImage.scan(0, 0, width, height, (x, y, idx) => {
@@ -409,8 +416,11 @@ async function decodeQrFromBuffer(buffer) {
 
     for (const variant of roiVariants) {
       try {
-        const text = await decodeWithQrReader(variant.make());
-        if (text) return { text, source: "qr", variant: variant.label };
+        const variantImage = variant.make();
+        const jsQrText = decodeWithJsQr(variantImage);
+        if (jsQrText) return { text: jsQrText, source: "qr-jsqr", variant: variant.label };
+        const readerText = await decodeWithQrReader(variantImage);
+        if (readerText) return { text: readerText, source: "qr-reader", variant: variant.label };
       } catch {}
     }
   } else {
@@ -451,8 +461,11 @@ async function decodeQrFromBuffer(buffer) {
 
   for (const variant of variants) {
     try {
-      const text = await decodeWithQrReader(variant.make());
-      if (text) return { text, source: "qr", variant: variant.label };
+      const variantImage = variant.make();
+      const jsQrText = decodeWithJsQr(variantImage);
+      if (jsQrText) return { text: jsQrText, source: "qr-jsqr", variant: variant.label };
+      const readerText = await decodeWithQrReader(variantImage);
+      if (readerText) return { text: readerText, source: "qr-reader", variant: variant.label };
     } catch {}
   }
 
