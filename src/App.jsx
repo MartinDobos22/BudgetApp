@@ -80,7 +80,12 @@ export default function App() {
     }
   }, [resp]);
 
-  const receipt = resp?.fsJson?.receipt ?? null;
+  const receipt =
+    resp?.fsJson?.receipt ??
+    resp?.fsJson?.data?.receipt ??
+    resp?.fsJson?.result?.receipt ??
+    resp?.fsJson?.response?.receipt ??
+    null;
   const organization = receipt?.organization ?? null;
   const unit = receipt?.unit ?? null;
   const items = useMemo(() => receipt?.items ?? [], [receipt]);
@@ -309,6 +314,19 @@ export default function App() {
               <strong>Chyba:</strong> {resp.error}
             </div>
             {resp.details && <pre className="pre">{JSON.stringify(resp.details, null, 2)}</pre>}
+          </div>
+        )}
+
+        {resp?.ok && !receipt && (
+          <div className="error">
+            <div>
+              <strong>Upozornenie:</strong> OPD odpoveď neobsahuje <code>receipt</code>. Skontroluj QR/OCR alebo
+              si pozri surový JSON nižšie.
+            </div>
+            <details className="raw-json">
+              <summary>Zobraziť surový JSON</summary>
+              <pre className="pre">{prettyJson}</pre>
+            </details>
           </div>
         )}
 
