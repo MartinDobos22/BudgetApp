@@ -280,7 +280,7 @@ async function decodeWithGoogleVision(buffer) {
           requests: [
             {
               image: { content: buffer.toString("base64") },
-              features: [{ type: "TEXT_DETECTION" }],
+              features: [{ type: "BARCODE_DETECTION" }, { type: "DOCUMENT_TEXT_DETECTION" }],
             },
           ],
         }),
@@ -293,9 +293,14 @@ async function decodeWithGoogleVision(buffer) {
     }
 
     const payload = await resp.json();
-    const annotation = payload?.responses?.[0]?.textAnnotations?.[0]?.description;
-    if (!annotation) return null;
-    return String(annotation).trim();
+    const barcodeAnnotation = payload?.responses?.[0]?.barcodeAnnotations?.[0]?.rawValue;
+    if (barcodeAnnotation) {
+      return { text: String(barcodeAnnotation).trim(), source: "barcode" };
+    }
+
+    const textAnnotation = payload?.responses?.[0]?.textAnnotations?.[0]?.description;
+    if (!textAnnotation) return null;
+    return { text: String(textAnnotation).trim(), source: "text" };
   } catch (err) {
     return null;
   }
@@ -385,8 +390,11 @@ async function decodeQrFromBuffer(buffer) {
   }
 
   if (GOOGLE_VISION_API_KEY) {
-    const text = await decodeWithGoogleVision(buffer);
-    if (text) return { text, source: "ocr", variant: "google_vision" };
+    const ocrResult = await decodeWithGoogleVision(buffer);
+    if (ocrResult?.text) {
+      const source = ocrResult.source === "barcode" ? "ocr-barcode" : "ocr-text";
+      return { text: ocrResult.text, source, variant: "google_vision" };
+    }
   }
 
   return null;
