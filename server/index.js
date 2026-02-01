@@ -172,8 +172,24 @@ async function decodeQrFromBuffer(buffer) {
 
 const OPD_URL = "https://ekasa.financnasprava.sk/mdu/api/v1/opd/receipt/find";
 
-function stripControlChars(s) {
-  return String(s || "").replace(/[\u0000-\u001F\u007F]/g, "").trim();
+function stripControlChars(s, { preserveNewlines = false } = {}) {
+  const pattern = preserveNewlines
+    ? /[\u0000-\u0009\u000B-\u000C\u000E-\u001F\u007F]/g
+    : /[\u0000-\u001F\u007F]/g;
+  return String(s || "").replace(pattern, "").trim();
+}
+
+function normalizeOkpCandidate(raw) {
+  const normalized = replaceDigitishCharacters(raw).toUpperCase();
+  const match = normalized.match(/[A-F0-9]{8}(?:[-:][A-F0-9]{8}){4}/);
+  if (match) return match[0].replace(/:/g, "-");
+
+  const packed = normalized.replace(/[^A-F0-9]/g, "");
+  if (packed.length >= 40) {
+    const parts = packed.slice(0, 40).match(/.{1,8}/g) || [];
+    if (parts.length === 5) return parts.join("-");
+  }
+  return null;
 }
 
 function extractOnlineReceiptIdFromAnything(raw) {
@@ -255,13 +271,13 @@ function parseOfflinePayloadFromColonText(qrText) {
 }
 
 function extractOfflinePayloadFromText(qrText) {
-  const lines = qrText
+  const cleanedText = stripControlChars(qrText, { preserveNewlines: true });
+  const lines = cleanedText
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
 
-  const okpMatch = qrText.match(/[A-F0-9]{8}(?:-[A-F0-9]{8}){4}/i);
-  const okp = okpMatch?.[0] || null;
+  const okp = normalizeOkpCandidate(cleanedText);
 
   const cashLine =
     lines.find((line) => /pokladn|pokladnic|pokladna|cash register/i.test(line)) ||
@@ -269,7 +285,7 @@ function extractOfflinePayloadFromText(qrText) {
   const cashMatch = cashLine?.match(/[0-9 ]{6,}/);
   const cashRegisterCode = cashMatch ? cashMatch[0].replace(/\s+/g, "") : null;
 
-  const normalizedText = replaceDigitishCharacters(qrText);
+  const normalizedText = replaceDigitishCharacters(cleanedText);
   const dateMatch = normalizedText.match(/(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2}:\d{2})/);
   const issueDateFormatted = dateMatch ? `${dateMatch[1]} ${dateMatch[2]}` : null;
 
@@ -282,15 +298,14 @@ function extractOfflinePayloadFromText(qrText) {
 
   let totalAmount = null;
   const totalIndex = lines.findIndex((line) => /suma|celkom|spolu|total/i.test(line));
-  if (totalIndex >= 0) {
-    const candidateLines = lines.slice(totalIndex, totalIndex + 4);
-    const numbers = candidateLines
-      .flatMap((line) => (replaceDigitishCharacters(line).match(/\d+(?:[.,]\d{1,2})?/g) || []))
-      .map(parseNumberStrict)
-      .filter((value) => value !== null);
-    if (numbers.length) {
-      totalAmount = numbers[numbers.length - 1];
-    }
+  const candidateLines =
+    totalIndex >= 0 ? lines.slice(totalIndex, totalIndex + 4) : lines.length ? lines : [cleanedText];
+  const numbers = candidateLines
+    .flatMap((line) => (replaceDigitishCharacters(line).match(/\d+(?:[.,]\d{1,2})/g) || []))
+    .map(parseNumberStrict)
+    .filter((value) => value !== null);
+  if (numbers.length) {
+    totalAmount = numbers[numbers.length - 1];
   }
 
   if (!okp || !cashRegisterCode || !issueDateFormatted || receiptNumber === null || totalAmount === null) {
@@ -320,9 +335,9 @@ function extractOfflinePayloadFromText(qrText) {
 }
 
 function buildLookupPayload(qrTextRaw) {
-  const qrText = stripControlChars(qrTextRaw);
+  const qrText = stripControlChars(qrTextRaw, { preserveNewlines: true });
   const debug = {
-    normalizedPreview: qrText.slice(0, 160),
+    normalizedPreview: qrText.replace(/\s+/g, " ").slice(0, 160),
   };
 
   // ONLINE
