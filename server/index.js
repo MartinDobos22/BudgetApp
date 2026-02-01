@@ -83,6 +83,14 @@ function applyThreshold(jimpImage, threshold = 170) {
   return jimpImage;
 }
 
+function applySharpen(jimpImage) {
+  return jimpImage.convolute([
+    [0, -1, 0],
+    [-1, 5, -1],
+    [0, -1, 0],
+  ]);
+}
+
 async function decodeWithGoogleVision(buffer) {
   if (!GOOGLE_VISION_API_KEY) return null;
 
@@ -140,14 +148,24 @@ async function decodeQrFromBuffer(buffer) {
     { label: "orig", make: () => img.clone() },
     { label: "gray-contrast", make: () => img.clone().greyscale().contrast(0.4).normalize() },
     { label: "gray-invert", make: () => img.clone().greyscale().invert().contrast(0.4).normalize() },
+    { label: "gray-autocrop", make: () => img.clone().greyscale().normalize().autocrop({ tolerance: 0.2 }) },
+    { label: "gray-autocrop-contrast", make: () => img.clone().greyscale().normalize().autocrop({ tolerance: 0.2 }).contrast(0.5) },
+    { label: "gray-sharpen", make: () => applySharpen(img.clone().greyscale().normalize()) },
+    { label: "resize-600", make: () => img.clone().greyscale().resize(600, Jimp.AUTO).contrast(0.3).normalize() },
     { label: "resize-900", make: () => img.clone().greyscale().resize(900, Jimp.AUTO).contrast(0.4).normalize() },
+    { label: "resize-1200", make: () => img.clone().greyscale().resize(1200, Jimp.AUTO).contrast(0.5).normalize() },
     { label: "resize-1400", make: () => img.clone().greyscale().resize(1400, Jimp.AUTO).contrast(0.6).normalize() },
     { label: "resize-1800", make: () => img.clone().greyscale().resize(1800, Jimp.AUTO).contrast(0.8).normalize() },
     { label: "resize-2400", make: () => img.clone().greyscale().resize(2400, Jimp.AUTO).contrast(0.8).normalize() },
+    { label: "resize-2400-sharpen", make: () => applySharpen(img.clone().greyscale().resize(2400, Jimp.AUTO).contrast(0.8).normalize()) },
+    { label: "threshold-140", make: () => applyThreshold(img.clone().greyscale().normalize(), 140) },
     { label: "threshold-160", make: () => applyThreshold(img.clone().greyscale().normalize(), 160) },
     { label: "threshold-200", make: () => applyThreshold(img.clone().greyscale().normalize(), 200) },
     { label: "threshold-1600", make: () => applyThreshold(img.clone().greyscale().resize(1600, Jimp.AUTO).normalize(), 170) },
     { label: "threshold-2000", make: () => applyThreshold(img.clone().greyscale().resize(2000, Jimp.AUTO).normalize(), 190) },
+    { label: "threshold-2000-sharpen", make: () => applySharpen(applyThreshold(img.clone().greyscale().resize(2000, Jimp.AUTO).normalize(), 180)) },
+    { label: "rotate-5", make: () => img.clone().rotate(5).greyscale().contrast(0.4).normalize() },
+    { label: "rotate--5", make: () => img.clone().rotate(-5).greyscale().contrast(0.4).normalize() },
     { label: "rotate-90", make: () => img.clone().rotate(90).greyscale().contrast(0.4).normalize() },
     { label: "rotate-180", make: () => img.clone().rotate(180).greyscale().contrast(0.4).normalize() },
     { label: "rotate-270", make: () => img.clone().rotate(270).greyscale().contrast(0.4).normalize() },
