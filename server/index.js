@@ -227,6 +227,41 @@ function applySharpen(jimpImage) {
   ]);
 }
 
+function applyMedianFilter(jimpImage, radius = 1) {
+  const { data, width, height } = jimpImage.bitmap;
+  const source = new Uint8ClampedArray(data);
+  const size = Math.max(1, radius | 0);
+  const window = size * 2 + 1;
+  const windowArea = window * window;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const samples = new Array(windowArea);
+      let i = 0;
+
+      for (let dy = -size; dy <= size; dy += 1) {
+        const yy = Math.max(0, Math.min(height - 1, y + dy));
+        for (let dx = -size; dx <= size; dx += 1) {
+          const xx = Math.max(0, Math.min(width - 1, x + dx));
+          const idx = (yy * width + xx) * 4;
+          const v = (source[idx] + source[idx + 1] + source[idx + 2]) / 3;
+          samples[i] = v;
+          i += 1;
+        }
+      }
+
+      samples.sort((a, b) => a - b);
+      const median = samples[Math.floor(samples.length / 2)];
+      const idx = (y * width + x) * 4;
+      data[idx] = median;
+      data[idx + 1] = median;
+      data[idx + 2] = median;
+    }
+  }
+
+  return jimpImage;
+}
+
 function findQrRoi(jimpImage) {
   const { data, width, height } = jimpImage.bitmap;
   const clamped = new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
@@ -267,40 +302,72 @@ function findQrRoi(jimpImage) {
   return { x, y, w, h };
 }
 
+async function buildOcrVariants(buffer) {
+  const img = await Jimp.read(buffer);
+  const width = img.bitmap.width;
+  const height = img.bitmap.height;
+
+  const variants = [
+    { label: "orig", image: img.clone() },
+    { label: "denoise", image: applyMedianFilter(img.clone().greyscale()) },
+    {
+      label: "upscale",
+      image: applyMedianFilter(img.clone().greyscale()).resize(width * 2, height * 2, Jimp.RESIZE_BICUBIC),
+    },
+  ];
+
+  const buffers = [];
+  for (const variant of variants) {
+    const content = await variant.image.getBufferAsync(Jimp.MIME_PNG);
+    buffers.push({ label: variant.label, buffer: content });
+  }
+
+  return buffers;
+}
+
 async function decodeWithGoogleVision(buffer) {
   if (!GOOGLE_VISION_API_KEY) return null;
 
   try {
-    const resp = await fetchWithTimeout(
-      `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          requests: [
-            {
-              image: { content: buffer.toString("base64") },
-              features: [{ type: "BARCODE_DETECTION" }, { type: "DOCUMENT_TEXT_DETECTION" }],
-            },
-          ],
-        }),
-      },
-      12000,
-    );
+    const variants = await buildOcrVariants(buffer);
 
-    if (!resp.ok) {
-      return null;
+    for (const variant of variants) {
+      const resp = await fetchWithTimeout(
+        `https://vision.googleapis.com/v1/images:annotate?key=${GOOGLE_VISION_API_KEY}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            requests: [
+              {
+                image: { content: variant.buffer.toString("base64") },
+                features: [{ type: "BARCODE_DETECTION" }, { type: "DOCUMENT_TEXT_DETECTION" }],
+              },
+            ],
+          }),
+        },
+        12000,
+      );
+
+      if (!resp.ok) {
+        continue;
+      }
+
+      const payload = await resp.json();
+      const barcodeAnnotation = payload?.responses?.[0]?.barcodeAnnotations?.[0]?.rawValue;
+      if (barcodeAnnotation) {
+        logStep("ocr", "Google Vision OCR succeeded", { variant: variant.label, source: "barcode" });
+        return { text: String(barcodeAnnotation).trim(), source: "barcode", variant: variant.label };
+      }
+
+      const textAnnotation = payload?.responses?.[0]?.textAnnotations?.[0]?.description;
+      if (textAnnotation) {
+        logStep("ocr", "Google Vision OCR succeeded", { variant: variant.label, source: "text" });
+        return { text: String(textAnnotation).trim(), source: "text", variant: variant.label };
+      }
     }
 
-    const payload = await resp.json();
-    const barcodeAnnotation = payload?.responses?.[0]?.barcodeAnnotations?.[0]?.rawValue;
-    if (barcodeAnnotation) {
-      return { text: String(barcodeAnnotation).trim(), source: "barcode" };
-    }
-
-    const textAnnotation = payload?.responses?.[0]?.textAnnotations?.[0]?.description;
-    if (!textAnnotation) return null;
-    return { text: String(textAnnotation).trim(), source: "text" };
+    return null;
   } catch (err) {
     return null;
   }
@@ -393,7 +460,7 @@ async function decodeQrFromBuffer(buffer) {
     const ocrResult = await decodeWithGoogleVision(buffer);
     if (ocrResult?.text) {
       const source = ocrResult.source === "barcode" ? "ocr-barcode" : "ocr-text";
-      return { text: ocrResult.text, source, variant: "google_vision" };
+      return { text: ocrResult.text, source, variant: ocrResult.variant || "google_vision" };
     }
   }
 
