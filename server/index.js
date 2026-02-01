@@ -269,6 +269,71 @@ function applyMedianFilter(jimpImage, radius = 1) {
   return jimpImage;
 }
 
+function applyDilation(jimpImage, radius = 1, threshold = 128) {
+  const { data, width, height } = jimpImage.bitmap;
+  const source = new Uint8ClampedArray(data);
+  const size = Math.max(1, radius | 0);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let hasBlack = false;
+      for (let dy = -size; dy <= size && !hasBlack; dy += 1) {
+        const yy = Math.max(0, Math.min(height - 1, y + dy));
+        for (let dx = -size; dx <= size; dx += 1) {
+          const xx = Math.max(0, Math.min(width - 1, x + dx));
+          const idx = (yy * width + xx) * 4;
+          if (source[idx] < threshold) {
+            hasBlack = true;
+            break;
+          }
+        }
+      }
+      const idx = (y * width + x) * 4;
+      const value = hasBlack ? 0 : 255;
+      data[idx] = value;
+      data[idx + 1] = value;
+      data[idx + 2] = value;
+    }
+  }
+
+  return jimpImage;
+}
+
+function applyErosion(jimpImage, radius = 1, threshold = 128) {
+  const { data, width, height } = jimpImage.bitmap;
+  const source = new Uint8ClampedArray(data);
+  const size = Math.max(1, radius | 0);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      let hasWhite = false;
+      for (let dy = -size; dy <= size && !hasWhite; dy += 1) {
+        const yy = Math.max(0, Math.min(height - 1, y + dy));
+        for (let dx = -size; dx <= size; dx += 1) {
+          const xx = Math.max(0, Math.min(width - 1, x + dx));
+          const idx = (yy * width + xx) * 4;
+          if (source[idx] >= threshold) {
+            hasWhite = true;
+            break;
+          }
+        }
+      }
+      const idx = (y * width + x) * 4;
+      const value = hasWhite ? 255 : 0;
+      data[idx] = value;
+      data[idx + 1] = value;
+      data[idx + 2] = value;
+    }
+  }
+
+  return jimpImage;
+}
+
+function applyMorphClose(jimpImage, radius = 1, threshold = 128) {
+  applyDilation(jimpImage, radius, threshold);
+  return applyErosion(jimpImage, radius, threshold);
+}
+
 function findQrRoi(jimpImage) {
   const { data, width, height } = jimpImage.bitmap;
   const clamped = new Uint8ClampedArray(data.buffer, data.byteOffset, data.byteLength);
@@ -408,10 +473,26 @@ async function decodeQrFromBuffer(buffer) {
       { label: "roi-orig", make: () => roiImg.clone() },
       { label: "roi-auto-levels", make: () => applyAutoLevels(roiImg.clone().greyscale()) },
       { label: "roi-otsu", make: () => applyOtsuThreshold(roiImg.clone().greyscale()) },
+      {
+        label: "roi-otsu-close-1",
+        make: () => applyMorphClose(applyOtsuThreshold(roiImg.clone().greyscale()), 1),
+      },
+      {
+        label: "roi-otsu-dilate-2",
+        make: () => applyDilation(applyOtsuThreshold(roiImg.clone().greyscale()), 2),
+      },
       { label: "roi-adaptive-mean-25", make: () => applyAdaptiveThreshold(roiImg.clone().greyscale(), 25, 6) },
       { label: "roi-gray-contrast", make: () => roiImg.clone().greyscale().contrast(0.4).normalize() },
       { label: "roi-gray-sharpen", make: () => applySharpen(roiImg.clone().greyscale().normalize()) },
       { label: "roi-threshold-170", make: () => applyThreshold(roiImg.clone().greyscale().normalize(), 170) },
+      {
+        label: "roi-threshold-170-close-1",
+        make: () => applyMorphClose(applyThreshold(roiImg.clone().greyscale().normalize(), 170), 1),
+      },
+      {
+        label: "roi-threshold-170-dilate-2",
+        make: () => applyDilation(applyThreshold(roiImg.clone().greyscale().normalize(), 170), 2),
+      },
     ];
 
     for (const variant of roiVariants) {
@@ -432,6 +513,8 @@ async function decodeQrFromBuffer(buffer) {
     { label: "gray-auto-levels", make: () => applyAutoLevels(img.clone().greyscale()) },
     { label: "gray-auto-levels-invert", make: () => applyAutoLevels(img.clone().greyscale().invert()) },
     { label: "gray-otsu", make: () => applyOtsuThreshold(img.clone().greyscale()) },
+    { label: "gray-otsu-close-1", make: () => applyMorphClose(applyOtsuThreshold(img.clone().greyscale()), 1) },
+    { label: "gray-otsu-dilate-2", make: () => applyDilation(applyOtsuThreshold(img.clone().greyscale()), 2) },
     { label: "gray-adaptive-mean-25", make: () => applyAdaptiveThreshold(img.clone().greyscale(), 25, 6) },
     { label: "gray-adaptive-mean-45", make: () => applyAdaptiveThreshold(img.clone().greyscale(), 45, 8) },
     { label: "gray-contrast", make: () => img.clone().greyscale().contrast(0.4).normalize() },
@@ -442,6 +525,14 @@ async function decodeQrFromBuffer(buffer) {
     { label: "threshold-140", make: () => applyThreshold(img.clone().greyscale().normalize(), 140) },
     { label: "threshold-160", make: () => applyThreshold(img.clone().greyscale().normalize(), 160) },
     { label: "threshold-200", make: () => applyThreshold(img.clone().greyscale().normalize(), 200) },
+    {
+      label: "threshold-160-close-1",
+      make: () => applyMorphClose(applyThreshold(img.clone().greyscale().normalize(), 160), 1),
+    },
+    {
+      label: "threshold-160-dilate-2",
+      make: () => applyDilation(applyThreshold(img.clone().greyscale().normalize(), 160), 2),
+    },
     { label: "threshold-1600", make: () => applyThreshold(img.clone().greyscale().resize(1600, Jimp.AUTO).normalize(), 170) },
     { label: "threshold-2000", make: () => applyThreshold(img.clone().greyscale().resize(2000, Jimp.AUTO).normalize(), 190) },
     { label: "threshold-2000-sharpen", make: () => applySharpen(applyThreshold(img.clone().greyscale().resize(2000, Jimp.AUTO).normalize(), 180)) },
