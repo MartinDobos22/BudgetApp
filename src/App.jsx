@@ -11,6 +11,8 @@ const numberFormatter = new Intl.NumberFormat("sk-SK", {
 });
 
 const UNCATEGORIZED_LABEL = "Nezaradené";
+const NO_SUBCATEGORY_LABEL = "Bez podkategórie";
+const CATEGORY_FILTER_ALL = "all";
 
 const STORE_GROUPS = [
   { label: "Lidl", keywords: ["lidl"] },
@@ -171,6 +173,8 @@ export default function App() {
   const [storeGroup, setStoreGroup] = useState("");
   const [notes, setNotes] = useState("");
   const [historyBusy, setHistoryBusy] = useState(false);
+  const [selectedMainCategory, setSelectedMainCategory] = useState(CATEGORY_FILTER_ALL);
+  const [selectedSubCategory, setSelectedSubCategory] = useState(CATEGORY_FILTER_ALL);
 
   const prettyJson = useMemo(() => {
     if (!resp) return "";
@@ -223,6 +227,49 @@ export default function App() {
     });
     return totals;
   }, [history]);
+
+  const categoryBreakdown = useMemo(() => {
+    const breakdown = {};
+    history.forEach((entry) => {
+      entry.items?.forEach((item) => {
+        const category = item?.category || UNCATEGORIZED_LABEL;
+        const price = Number(item?.price) || 0;
+        const [mainRaw, ...rest] = String(category).split("/");
+        const main = mainRaw?.trim() || UNCATEGORIZED_LABEL;
+        const sub = rest.join("/").trim() || NO_SUBCATEGORY_LABEL;
+        if (!breakdown[main]) {
+          breakdown[main] = { total: 0, subcategories: {} };
+        }
+        breakdown[main].total += price;
+        breakdown[main].subcategories[sub] = (breakdown[main].subcategories[sub] || 0) + price;
+      });
+    });
+    return breakdown;
+  }, [history]);
+
+  const mainCategoryOptions = useMemo(
+    () => Object.keys(categoryBreakdown).sort((a, b) => a.localeCompare(b, "sk")),
+    [categoryBreakdown],
+  );
+
+  const subCategoryOptions = useMemo(() => {
+    if (selectedMainCategory === CATEGORY_FILTER_ALL) return [];
+    const subcategories = categoryBreakdown[selectedMainCategory]?.subcategories ?? {};
+    return Object.keys(subcategories).sort((a, b) => a.localeCompare(b, "sk"));
+  }, [categoryBreakdown, selectedMainCategory]);
+
+  const categorySummaryRows = useMemo(() => {
+    if (selectedMainCategory === CATEGORY_FILTER_ALL) {
+      return Object.entries(totalsByCategory).sort((a, b) => b[1] - a[1]);
+    }
+    const subcategories = categoryBreakdown[selectedMainCategory]?.subcategories ?? {};
+    if (selectedSubCategory !== CATEGORY_FILTER_ALL) {
+      return [[`${selectedMainCategory}/${selectedSubCategory}`, subcategories[selectedSubCategory] || 0]];
+    }
+    return Object.entries(subcategories)
+      .map(([subcategory, total]) => [`${selectedMainCategory}/${subcategory}`, total])
+      .sort((a, b) => b[1] - a[1]);
+  }, [categoryBreakdown, selectedMainCategory, selectedSubCategory, totalsByCategory]);
 
   const totalsByStore = useMemo(() => {
     const totals = {};
@@ -686,15 +733,56 @@ export default function App() {
 
             <div className="receipt-section">
               <h4>Sumár podľa kategórií</h4>
+              <div className="summary-filters">
+                <label>
+                  <span className="field-label">Hlavná kategória</span>
+                  <select
+                    value={selectedMainCategory}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setSelectedMainCategory(value);
+                      setSelectedSubCategory(CATEGORY_FILTER_ALL);
+                    }}
+                  >
+                    <option value={CATEGORY_FILTER_ALL}>Všetky kategórie</option>
+                    {mainCategoryOptions.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span className="field-label">Podkategória</span>
+                  <select
+                    value={selectedSubCategory}
+                    onChange={(event) => setSelectedSubCategory(event.target.value)}
+                    disabled={selectedMainCategory === CATEGORY_FILTER_ALL}
+                  >
+                    <option value={CATEGORY_FILTER_ALL}>
+                      {selectedMainCategory === CATEGORY_FILTER_ALL
+                        ? "Najprv vyber hlavnú kategóriu"
+                        : "Všetky podkategórie"}
+                    </option>
+                    {subCategoryOptions.map((subcategory) => (
+                      <option key={subcategory} value={subcategory}>
+                        {subcategory}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
               <div className="summary-table">
-                {Object.entries(totalsByCategory)
-                  .sort((a, b) => b[1] - a[1])
-                  .map(([category, total]) => (
+                {categorySummaryRows.length === 0 ? (
+                  <p className="muted">Žiadne dáta pre vybraný filter.</p>
+                ) : (
+                  categorySummaryRows.map(([category, total]) => (
                     <div className="summary-row" key={category}>
                       <span>{category}</span>
                       <span className="summary-amount">{formatCurrency(total)}</span>
                     </div>
-                  ))}
+                  ))
+                )}
               </div>
             </div>
 
