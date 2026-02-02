@@ -642,7 +642,7 @@ function normalizeOkpCandidate(raw) {
 }
 
 function extractOnlineReceiptIdFromAnything(raw) {
-  const s = stripControlChars(raw);
+  const s = stripControlChars(raw, { preserveNewlines: true });
   const re = /O-[A-F0-9]{32}/i;
 
   // 1) priamo "O-..."
@@ -667,6 +667,19 @@ function extractOnlineReceiptIdFromAnything(raw) {
       if (pathMatch) return pathMatch[0].toUpperCase();
     }
   } catch {}
+
+  // 4) uvoľnený OCR zápis (medzery, dvojbodky, pomlčky medzi znakmi)
+  const looseMatch = s.match(/O\s*[-–]?\s*(?:[A-F0-9][\s:-]*){32}/i);
+  if (looseMatch) {
+    const hex = looseMatch[0].replace(/[^A-F0-9]/gi, "").toUpperCase();
+    if (hex.length >= 32) return `O-${hex.slice(0, 32)}`;
+  }
+
+  const looseZeroMatch = s.match(/0\s*[-–]?\s*(?:[A-F0-9][\s:-]*){32}/i);
+  if (looseZeroMatch) {
+    const hex = looseZeroMatch[0].replace(/[^A-F0-9]/gi, "").toUpperCase();
+    if (hex.length >= 32) return `O-${hex.slice(0, 32)}`;
+  }
 
   return null;
 }
