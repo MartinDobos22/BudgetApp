@@ -234,6 +234,11 @@ function applySharpen(jimpImage) {
   ]);
 }
 
+function applyBlur(jimpImage, radius = 1) {
+  const size = Math.max(1, radius | 0);
+  return jimpImage.blur(size);
+}
+
 function applyMedianFilter(jimpImage, radius = 1) {
   const { data, width, height } = jimpImage.bitmap;
   const source = new Uint8ClampedArray(data);
@@ -478,20 +483,40 @@ async function decodeQrFromBuffer(buffer) {
         make: () => applyMorphClose(applyOtsuThreshold(roiImg.clone().greyscale()), 1),
       },
       {
+        label: "roi-otsu-close-2",
+        make: () => applyMorphClose(applyOtsuThreshold(roiImg.clone().greyscale()), 2),
+      },
+      {
         label: "roi-otsu-dilate-2",
         make: () => applyDilation(applyOtsuThreshold(roiImg.clone().greyscale()), 2),
       },
       { label: "roi-adaptive-mean-25", make: () => applyAdaptiveThreshold(roiImg.clone().greyscale(), 25, 6) },
+      {
+        label: "roi-adaptive-mean-25-close-1",
+        make: () => applyMorphClose(applyAdaptiveThreshold(roiImg.clone().greyscale(), 25, 6), 1),
+      },
       { label: "roi-gray-contrast", make: () => roiImg.clone().greyscale().contrast(0.4).normalize() },
       { label: "roi-gray-sharpen", make: () => applySharpen(roiImg.clone().greyscale().normalize()) },
+      {
+        label: "roi-gray-blur-2-otsu",
+        make: () => applyOtsuThreshold(applyBlur(roiImg.clone().greyscale().normalize(), 2)),
+      },
       { label: "roi-threshold-170", make: () => applyThreshold(roiImg.clone().greyscale().normalize(), 170) },
       {
         label: "roi-threshold-170-close-1",
         make: () => applyMorphClose(applyThreshold(roiImg.clone().greyscale().normalize(), 170), 1),
       },
       {
+        label: "roi-threshold-170-close-2",
+        make: () => applyMorphClose(applyThreshold(roiImg.clone().greyscale().normalize(), 170), 2),
+      },
+      {
         label: "roi-threshold-170-dilate-2",
         make: () => applyDilation(applyThreshold(roiImg.clone().greyscale().normalize(), 170), 2),
+      },
+      {
+        label: "roi-threshold-170-dilate-3",
+        make: () => applyDilation(applyThreshold(roiImg.clone().greyscale().normalize(), 170), 3),
       },
     ];
 
@@ -514,14 +539,23 @@ async function decodeQrFromBuffer(buffer) {
     { label: "gray-auto-levels-invert", make: () => applyAutoLevels(img.clone().greyscale().invert()) },
     { label: "gray-otsu", make: () => applyOtsuThreshold(img.clone().greyscale()) },
     { label: "gray-otsu-close-1", make: () => applyMorphClose(applyOtsuThreshold(img.clone().greyscale()), 1) },
+    { label: "gray-otsu-close-2", make: () => applyMorphClose(applyOtsuThreshold(img.clone().greyscale()), 2) },
     { label: "gray-otsu-dilate-2", make: () => applyDilation(applyOtsuThreshold(img.clone().greyscale()), 2) },
     { label: "gray-adaptive-mean-25", make: () => applyAdaptiveThreshold(img.clone().greyscale(), 25, 6) },
+    {
+      label: "gray-adaptive-mean-25-close-1",
+      make: () => applyMorphClose(applyAdaptiveThreshold(img.clone().greyscale(), 25, 6), 1),
+    },
     { label: "gray-adaptive-mean-45", make: () => applyAdaptiveThreshold(img.clone().greyscale(), 45, 8) },
     { label: "gray-contrast", make: () => img.clone().greyscale().contrast(0.4).normalize() },
     { label: "gray-invert", make: () => img.clone().greyscale().invert().contrast(0.4).normalize() },
     { label: "gray-autocrop", make: () => img.clone().greyscale().normalize().autocrop({ tolerance: 0.2 }) },
     { label: "gray-autocrop-contrast", make: () => img.clone().greyscale().normalize().autocrop({ tolerance: 0.2 }).contrast(0.5) },
     { label: "gray-sharpen", make: () => applySharpen(img.clone().greyscale().normalize()) },
+    {
+      label: "gray-blur-2-otsu",
+      make: () => applyOtsuThreshold(applyBlur(img.clone().greyscale().normalize(), 2)),
+    },
     { label: "threshold-140", make: () => applyThreshold(img.clone().greyscale().normalize(), 140) },
     { label: "threshold-160", make: () => applyThreshold(img.clone().greyscale().normalize(), 160) },
     { label: "threshold-200", make: () => applyThreshold(img.clone().greyscale().normalize(), 200) },
@@ -530,8 +564,20 @@ async function decodeQrFromBuffer(buffer) {
       make: () => applyMorphClose(applyThreshold(img.clone().greyscale().normalize(), 160), 1),
     },
     {
+      label: "threshold-160-close-2",
+      make: () => applyMorphClose(applyThreshold(img.clone().greyscale().normalize(), 160), 2),
+    },
+    {
       label: "threshold-160-dilate-2",
       make: () => applyDilation(applyThreshold(img.clone().greyscale().normalize(), 160), 2),
+    },
+    {
+      label: "threshold-160-dilate-3",
+      make: () => applyDilation(applyThreshold(img.clone().greyscale().normalize(), 160), 3),
+    },
+    {
+      label: "gray-blur-2-threshold-160",
+      make: () => applyThreshold(applyBlur(img.clone().greyscale().normalize(), 2), 160),
     },
     { label: "threshold-1600", make: () => applyThreshold(img.clone().greyscale().resize(1600, Jimp.AUTO).normalize(), 170) },
     { label: "threshold-2000", make: () => applyThreshold(img.clone().greyscale().resize(2000, Jimp.AUTO).normalize(), 190) },
