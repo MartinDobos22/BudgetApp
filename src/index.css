@@ -245,6 +245,20 @@ code { background: #f0f2f7; padding: 2px 6px; border-radius: 8px; }
   flex-wrap: wrap;
 }
 
+.summary-filters {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+
+.summary-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+}
+
 .summary-table {
   display: grid;
   gap: 8px;
