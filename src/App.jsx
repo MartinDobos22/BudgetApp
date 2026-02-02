@@ -21,6 +21,8 @@ const STORE_GROUPS = [
   { label: "Tesco", keywords: ["tesco"] },
   { label: "Kaufland", keywords: ["kaufland"] },
   { label: "Coop Jednota", keywords: ["jednota", "coop"] },
+  { label: "Fajne", keywords: ["Fajne", "fajne potraviny"] },
+  { label: "Labaš", keywords: ["Labaš", "Labaš s.r.o."] },
 ];
 
 const ERROR_TIPS = {
