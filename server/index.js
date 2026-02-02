@@ -41,6 +41,7 @@ loadEnvFile(path.resolve(process.cwd(), ".env"));
 
 const app = express();
 app.use(cors());
+app.use(express.json({ limit: "1mb" }));
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -55,6 +56,49 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
 });
+
+// ----- Receipt history storage (JSON file) -----
+
+const DATA_DIR = path.resolve(process.cwd(), "data");
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+const RECEIPTS_PATH = path.join(DATA_DIR, "receipts.json");
+
+function readReceiptsFile() {
+  if (!fs.existsSync(RECEIPTS_PATH)) {
+    return [];
+  }
+  try {
+    const raw = fs.readFileSync(RECEIPTS_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeReceiptsFile(receipts) {
+  const tempPath = `${RECEIPTS_PATH}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(receipts, null, 2));
+  fs.renameSync(tempPath, RECEIPTS_PATH);
+}
+
+function normalizeReceiptPayload(payload) {
+  const now = new Date().toISOString();
+  const id = payload?.id ? String(payload.id) : `${Date.now()}`;
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  return {
+    id,
+    createdAt: payload?.createdAt ? String(payload.createdAt) : now,
+    issueDate: payload?.issueDate ? String(payload.issueDate) : null,
+    storeName: payload?.storeName ? String(payload.storeName) : "Neznámy obchod",
+    storeGroup: payload?.storeGroup ? String(payload.storeGroup) : null,
+    totalPrice: Number(payload?.totalPrice) || 0,
+    notes: payload?.notes ? String(payload.notes) : "",
+    items,
+  };
+}
 
 // ----- QR decode helpers -----
 
@@ -1074,6 +1118,51 @@ export async function categorizeItemsWithOpenAI(fsJson, { OPENAI_API_KEY, OPENAI
 
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, service: "qr-blocek-opd-backend" });
+});
+
+/**
+ * GET /api/receipts
+ */
+app.get("/api/receipts", (req, res) => {
+  try {
+    const receipts = readReceiptsFile();
+    return res.json({ ok: true, receipts });
+  } catch (error) {
+    logStep("receipts", "Failed to list receipts", { error: error?.message || String(error) });
+    return res.status(500).json({ ok: false, error: "Nepodarilo sa načítať históriu bločkov." });
+  }
+});
+
+/**
+ * POST /api/receipts
+ */
+app.post("/api/receipts", (req, res) => {
+  try {
+    const payload = normalizeReceiptPayload(req.body || {});
+    const receipts = readReceiptsFile();
+    const filtered = receipts.filter((receipt) => receipt.id !== payload.id);
+    const next = [payload, ...filtered].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+    writeReceiptsFile(next);
+    return res.json({ ok: true, receipt: payload });
+  } catch (error) {
+    logStep("receipts", "Failed to save receipt", { error: error?.message || String(error) });
+    return res.status(500).json({ ok: false, error: "Nepodarilo sa uložiť bloček." });
+  }
+});
+
+/**
+ * DELETE /api/receipts
+ */
+app.delete("/api/receipts", (req, res) => {
+  try {
+    writeReceiptsFile([]);
+    return res.json({ ok: true });
+  } catch (error) {
+    logStep("receipts", "Failed to clear receipts", { error: error?.message || String(error) });
+    return res.status(500).json({ ok: false, error: "Nepodarilo sa vymazať históriu." });
+  }
 });
 
 /**

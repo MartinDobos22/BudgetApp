@@ -21,8 +21,6 @@ const STORE_GROUPS = [
   { label: "Coop Jednota", keywords: ["jednota", "coop"] },
 ];
 
-const STORAGE_KEY = "budgetapp-receipts-v1";
-
 const ERROR_TIPS = {
   qr_decode_failed: "Priblíž QR, zvýš kontrast alebo pridaj viac svetla. Skús aj zmeniť uhol fotenia.",
   ocr_text_no_payload: "Skús odfotiť QR viac zblízka, bez odleskov a s vyšším kontrastom.",
@@ -77,6 +75,7 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [storeGroup, setStoreGroup] = useState("");
   const [notes, setNotes] = useState("");
+  const [historyBusy, setHistoryBusy] = useState(false);
 
   const prettyJson = useMemo(() => {
     if (!resp) return "";
@@ -141,19 +140,25 @@ export default function App() {
   }, [history]);
 
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        setHistory(JSON.parse(stored));
-      }
-    } catch {
-      setHistory([]);
-    }
-  }, []);
+    let cancelled = false;
 
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
-  }, [history]);
+    async function loadHistory() {
+      try {
+        const response = await fetch("/api/receipts");
+        const data = await response.json().catch(() => ({}));
+        if (!cancelled && response.ok) {
+          setHistory(Array.isArray(data?.receipts) ? data.receipts : []);
+        }
+      } catch {
+        if (!cancelled) setHistory([]);
+      }
+    }
+
+    loadHistory();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!receipt) {
@@ -210,7 +215,7 @@ export default function App() {
     );
   }
 
-  function saveToHistory() {
+  async function saveToHistory() {
     if (!receipt) return;
     console.log("[FE] saving receipt to history", { items: categorizedItems.length });
     const entryItems = categorizedItems.map((item) => ({
@@ -229,12 +234,36 @@ export default function App() {
       notes: notes.trim(),
       items: entryItems,
     };
-    setHistory((prev) => [entry, ...prev]);
+    try {
+      setHistoryBusy(true);
+      const response = await fetch("/api/receipts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(entry),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) {
+        const saved = data?.receipt || entry;
+        setHistory((prev) => [saved, ...prev.filter((item) => item.id !== saved.id)]);
+      }
+    } finally {
+      setHistoryBusy(false);
+    }
   }
 
-  function clearHistory() {
+  async function clearHistory() {
     console.log("[FE] clearing history");
-    setHistory([]);
+    try {
+      setHistoryBusy(true);
+      const response = await fetch("/api/receipts", { method: "DELETE" });
+      if (response.ok) {
+        setHistory([]);
+      }
+    } finally {
+      setHistoryBusy(false);
+    }
   }
 
   function onPickFile(e) {
@@ -472,8 +501,8 @@ export default function App() {
                     <option value={store.label} key={store.label} />
                   ))}
                 </datalist>
-                <button type="button" onClick={saveToHistory}>
-                  Uložiť bloček
+                <button type="button" onClick={saveToHistory} disabled={historyBusy}>
+                  {historyBusy ? "Ukladám..." : "Uložiť bloček"}
                 </button>
               </div>
             </div>
@@ -534,8 +563,8 @@ export default function App() {
       <section className="card">
         <div className="history-header">
           <h2>História a sumáre</h2>
-          <button type="button" onClick={clearHistory} disabled={history.length === 0}>
-            Vymazať históriu
+          <button type="button" onClick={clearHistory} disabled={history.length === 0 || historyBusy}>
+            {historyBusy ? "Mažem..." : "Vymazať históriu"}
           </button>
         </div>
 
