@@ -34,15 +34,30 @@ function padNumber(value) {
   return String(value).padStart(2, "0");
 }
 
+function parseIssueDate(value) {
+  if (!value) return null;
+  const source = String(value).trim();
+  const isoMatch = source.match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?$/);
+  if (isoMatch) {
+    const timePart = isoMatch[2] ? `T${isoMatch[2]}` : "T00:00:00";
+    const date = new Date(`${isoMatch[1]}${timePart}`);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  const skMatch = source.match(/^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}:\d{2}:\d{2}))?$/);
+  if (skMatch) {
+    const timePart = skMatch[4] || "00:00:00";
+    const date = new Date(`${skMatch[3]}-${skMatch[2]}-${skMatch[1]}T${timePart}`);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  const parsed = new Date(source);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  return null;
+}
+
 function parseEntryDate(entry) {
   if (entry?.issueDate) {
-    const source = String(entry.issueDate).trim();
-    if (source.length === 10) {
-      const date = new Date(`${source}T00:00:00`);
-      if (!Number.isNaN(date.getTime())) return date;
-    }
-    const parsed = new Date(source);
-    if (!Number.isNaN(parsed.getTime())) return parsed;
+    const parsedIssueDate = parseIssueDate(entry.issueDate);
+    if (parsedIssueDate) return parsedIssueDate;
   }
 
   if (entry?.createdAt) {
@@ -263,12 +278,16 @@ export default function App() {
       return Object.entries(totalsByCategory).sort((a, b) => b[1] - a[1]);
     }
     const subcategories = categoryBreakdown[selectedMainCategory]?.subcategories ?? {};
+    const rows = [[selectedMainCategory, categoryBreakdown[selectedMainCategory]?.total || 0]];
     if (selectedSubCategory !== CATEGORY_FILTER_ALL) {
-      return [[`${selectedMainCategory}/${selectedSubCategory}`, subcategories[selectedSubCategory] || 0]];
+      rows.push([`${selectedMainCategory}/${selectedSubCategory}`, subcategories[selectedSubCategory] || 0]);
+      return rows;
     }
-    return Object.entries(subcategories)
+    return rows.concat(
+      Object.entries(subcategories)
       .map(([subcategory, total]) => [`${selectedMainCategory}/${subcategory}`, total])
-      .sort((a, b) => b[1] - a[1]);
+      .sort((a, b) => b[1] - a[1]),
+    );
   }, [categoryBreakdown, selectedMainCategory, selectedSubCategory, totalsByCategory]);
 
   const totalsByStore = useMemo(() => {
