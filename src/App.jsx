@@ -28,6 +28,101 @@ const ERROR_TIPS = {
   missing_image: "Vyber obrázok bločku a nahraj ho znova.",
 };
 
+function padNumber(value) {
+  return String(value).padStart(2, "0");
+}
+
+function parseEntryDate(entry) {
+  if (entry?.issueDate) {
+    const source = String(entry.issueDate).trim();
+    if (source.length === 10) {
+      const date = new Date(`${source}T00:00:00`);
+      if (!Number.isNaN(date.getTime())) return date;
+    }
+    const parsed = new Date(source);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+
+  if (entry?.createdAt) {
+    const created = new Date(entry.createdAt);
+    if (!Number.isNaN(created.getTime())) return created;
+  }
+
+  return null;
+}
+
+function formatDayKey(date) {
+  return `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}-${padNumber(date.getDate())}`;
+}
+
+function getIsoWeekInfo(date) {
+  const utcDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const weekday = utcDate.getUTCDay() || 7;
+  utcDate.setUTCDate(utcDate.getUTCDate() + 4 - weekday);
+  const yearStart = new Date(Date.UTC(utcDate.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil(((utcDate - yearStart) / 86400000 + 1) / 7);
+  return { year: utcDate.getUTCFullYear(), week: weekNumber };
+}
+
+function getIsoWeekRange(date) {
+  const weekday = date.getDay() || 7;
+  const monday = new Date(date);
+  monday.setDate(date.getDate() - weekday + 1);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return { monday, sunday };
+}
+
+function formatShortDate(date) {
+  return date.toLocaleDateString("sk-SK", { day: "2-digit", month: "2-digit" });
+}
+
+function formatMonthLabel(date) {
+  return date.toLocaleDateString("sk-SK", { month: "long", year: "numeric" });
+}
+
+function getEntryTotal(entry) {
+  return (
+    Number(entry?.totalPrice) ||
+    entry?.items?.reduce((sum, item) => sum + (Number(item?.price) || 0), 0) ||
+    0
+  );
+}
+
+function buildTimeTotals(history, granularity) {
+  const totals = new Map();
+
+  history.forEach((entry) => {
+    const date = parseEntryDate(entry);
+    if (!date) return;
+
+    const total = getEntryTotal(entry);
+    if (!total) return;
+
+    let key = "";
+    let label = "";
+
+    if (granularity === "day") {
+      key = formatDayKey(date);
+      label = date.toLocaleDateString("sk-SK");
+    } else if (granularity === "week") {
+      const { year, week } = getIsoWeekInfo(date);
+      key = `${year}-W${padNumber(week)}`;
+      const { monday, sunday } = getIsoWeekRange(date);
+      label = `Týždeň ${week} (${formatShortDate(monday)} – ${formatShortDate(sunday)})`;
+    } else {
+      key = `${date.getFullYear()}-${padNumber(date.getMonth() + 1)}`;
+      label = formatMonthLabel(date);
+    }
+
+    const current = totals.get(key) || { key, label, total: 0 };
+    current.total += total;
+    totals.set(key, current);
+  });
+
+  return Array.from(totals.values()).sort((a, b) => b.key.localeCompare(a.key));
+}
+
 function normalizeText(value) {
   return String(value || "")
     .toLowerCase()
@@ -133,11 +228,15 @@ export default function App() {
     const totals = {};
     history.forEach((entry) => {
       const store = entry?.storeGroup || entry?.storeName || "Neznámy obchod";
-      const price = Number(entry?.totalPrice) || entry.items?.reduce((sum, item) => sum + (Number(item?.price) || 0), 0) || 0;
+      const price = getEntryTotal(entry);
       totals[store] = (totals[store] || 0) + price;
     });
     return totals;
   }, [history]);
+
+  const totalsByDay = useMemo(() => buildTimeTotals(history, "day"), [history]);
+  const totalsByWeek = useMemo(() => buildTimeTotals(history, "week"), [history]);
+  const totalsByMonth = useMemo(() => buildTimeTotals(history, "month"), [history]);
 
   useEffect(() => {
     let cancelled = false;
@@ -610,6 +709,57 @@ export default function App() {
                       <span className="summary-amount">{formatCurrency(total)}</span>
                     </div>
                   ))}
+              </div>
+            </div>
+
+            <div className="receipt-section">
+              <h4>Výdavky podľa času</h4>
+              <div className="summary-grid">
+                <div>
+                  <p className="muted">Denne</p>
+                  <div className="summary-table">
+                    {totalsByDay.length === 0 ? (
+                      <p className="muted">Nie sú dostupné denné dáta.</p>
+                    ) : (
+                      totalsByDay.map((entry) => (
+                        <div className="summary-row" key={entry.key}>
+                          <span>{entry.label}</span>
+                          <span className="summary-amount">{formatCurrency(entry.total)}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <p className="muted">Týždenne</p>
+                  <div className="summary-table">
+                    {totalsByWeek.length === 0 ? (
+                      <p className="muted">Nie sú dostupné týždenné dáta.</p>
+                    ) : (
+                      totalsByWeek.map((entry) => (
+                        <div className="summary-row" key={entry.key}>
+                          <span>{entry.label}</span>
+                          <span className="summary-amount">{formatCurrency(entry.total)}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <p className="muted">Mesačne</p>
+                  <div className="summary-table">
+                    {totalsByMonth.length === 0 ? (
+                      <p className="muted">Nie sú dostupné mesačné dáta.</p>
+                    ) : (
+                      totalsByMonth.map((entry) => (
+                        <div className="summary-row" key={entry.key}>
+                          <span>{entry.label}</span>
+                          <span className="summary-amount">{formatCurrency(entry.total)}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
