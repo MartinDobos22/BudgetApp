@@ -135,6 +135,37 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
   grid-template-columns: 2.3fr 0.7fr 0.6fr 0.8fr 1.2fr;
 }
 
+.manual-items .items-head,
+.manual-items .items-row {
+  grid-template-columns: 2fr 0.8fr 0.8fr 1fr auto;
+}
+
+.manual-items input {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid #d6d9e4;
+  background: #fff;
+}
+
+.manual-items .items-row button {
+  padding: 8px 12px;
+  background: #f0f2f7;
+  color: #111;
+}
+
+.manual-items-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.manual-total {
+  font-weight: 600;
+}
+
 .items-head {
   font-weight: 600;
   color: #4a4f63;

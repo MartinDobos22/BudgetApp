@@ -190,6 +190,13 @@ export default function App() {
   const [storeGroup, setStoreGroup] = useState("");
   const [notes, setNotes] = useState("");
   const [historyBusy, setHistoryBusy] = useState(false);
+  const [manualStoreName, setManualStoreName] = useState("");
+  const [manualStoreGroup, setManualStoreGroup] = useState("");
+  const [manualIssueDate, setManualIssueDate] = useState("");
+  const [manualNotes, setManualNotes] = useState("");
+  const [manualItems, setManualItems] = useState([
+    { name: "", quantity: 1, price: "", category: "" },
+  ]);
   const [selectedMainCategory, setSelectedMainCategory] = useState(CATEGORY_FILTER_ALL);
   const [selectedSubCategory, setSelectedSubCategory] = useState(CATEGORY_FILTER_ALL);
 
@@ -306,6 +313,21 @@ export default function App() {
   const totalsByWeek = useMemo(() => buildTimeTotals(history, "week"), [history]);
   const totalsByMonth = useMemo(() => buildTimeTotals(history, "month"), [history]);
 
+  const manualCategorySuggestions = useMemo(() => {
+    const categories = new Set();
+    history.forEach((entry) => {
+      entry.items?.forEach((item) => {
+        if (item?.category) categories.add(item.category);
+      });
+    });
+    return Array.from(categories);
+  }, [history]);
+
+  const manualItemsTotal = useMemo(
+    () => manualItems.reduce((sum, item) => sum + (Number(item?.price) || 0), 0),
+    [manualItems],
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -382,6 +404,28 @@ export default function App() {
     );
   }
 
+  function updateManualItem(index, key, value) {
+    setManualItems((prev) =>
+      prev.map((item, idx) => (idx === index ? { ...item, [key]: value } : item)),
+    );
+  }
+
+  function addManualItem() {
+    setManualItems((prev) => [...prev, { name: "", quantity: 1, price: "", category: "" }]);
+  }
+
+  function removeManualItem(index) {
+    setManualItems((prev) => prev.filter((_, idx) => idx !== index));
+  }
+
+  function resetManualForm() {
+    setManualStoreName("");
+    setManualStoreGroup("");
+    setManualIssueDate("");
+    setManualNotes("");
+    setManualItems([{ name: "", quantity: 1, price: "", category: "" }]);
+  }
+
   async function saveToHistory() {
     if (!receipt) return;
     console.log("[FE] saving receipt to history", { items: categorizedItems.length });
@@ -414,6 +458,52 @@ export default function App() {
       if (response.ok) {
         const saved = data?.receipt || entry;
         setHistory((prev) => [saved, ...prev.filter((item) => item.id !== saved.id)]);
+      }
+    } finally {
+      setHistoryBusy(false);
+    }
+  }
+
+  async function saveManualEntry() {
+    const filteredItems = manualItems
+      .map((item) => ({
+        name: item?.name?.trim(),
+        quantity: Number(item?.quantity) || 0,
+        price: Number(item?.price) || 0,
+        category: item?.category?.trim() || "",
+      }))
+      .filter((item) => item.name || item.price);
+    if (filteredItems.length === 0) return;
+    const entryItems = filteredItems.map((item) => ({
+      name: item.name || "-",
+      quantity: item.quantity || 0,
+      price: item.price || 0,
+      category: item.category || UNCATEGORIZED_LABEL,
+    }));
+    const entry = {
+      id: `${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      issueDate: manualIssueDate || null,
+      storeName: manualStoreName.trim() || "Manuálny záznam",
+      storeGroup: manualStoreGroup.trim() || manualStoreName.trim() || "Nezaradené",
+      totalPrice: entryItems.reduce((sum, item) => sum + (Number(item.price) || 0), 0),
+      notes: manualNotes.trim(),
+      items: entryItems,
+    };
+    try {
+      setHistoryBusy(true);
+      const response = await fetch("/api/receipts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(entry),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) {
+        const saved = data?.receipt || entry;
+        setHistory((prev) => [saved, ...prev.filter((item) => item.id !== saved.id)]);
+        resetManualForm();
       }
     } finally {
       setHistoryBusy(false);
@@ -763,6 +853,120 @@ export default function App() {
           <button type="button" onClick={clearHistory} disabled={history.length === 0 || historyBusy}>
             {historyBusy ? "Mažem..." : "Vymazať históriu"}
           </button>
+        </div>
+
+        <div className="receipt-section manual-entry">
+          <h4>Manuálne pridať výdavok</h4>
+          <div className="history-form manual-form">
+            <label>
+              <span className="field-label">Obchod</span>
+              <input
+                type="text"
+                value={manualStoreName}
+                onChange={(event) => setManualStoreName(event.target.value)}
+                placeholder="napr. Lidl, Billa"
+              />
+            </label>
+            <label>
+              <span className="field-label">Skupina obchodu</span>
+              <input
+                type="text"
+                value={manualStoreGroup}
+                onChange={(event) => setManualStoreGroup(event.target.value)}
+                list="manual-store-groups"
+                placeholder="potraviny, drogéria..."
+              />
+            </label>
+            <label>
+              <span className="field-label">Dátum</span>
+              <input
+                type="date"
+                value={manualIssueDate}
+                onChange={(event) => setManualIssueDate(event.target.value)}
+              />
+            </label>
+            <label>
+              <span className="field-label">Poznámka</span>
+              <input
+                type="text"
+                value={manualNotes}
+                onChange={(event) => setManualNotes(event.target.value)}
+                placeholder="napr. rýchly nákup"
+              />
+            </label>
+          </div>
+          <datalist id="manual-store-groups">
+            {STORE_GROUPS.map((store) => (
+              <option value={store.label} key={store.label} />
+            ))}
+          </datalist>
+
+          <div className="items-table manual-items">
+            <div className="items-head">
+              <span>Názov</span>
+              <span>Množstvo</span>
+              <span>Cena</span>
+              <span>Kategória</span>
+              <span>Akcia</span>
+            </div>
+            {manualItems.map((item, idx) => (
+              <div className="items-row" key={`manual-${idx}`}>
+                <input
+                  type="text"
+                  value={item.name}
+                  onChange={(event) => updateManualItem(idx, "name", event.target.value)}
+                  placeholder="položka"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={item.quantity}
+                  onChange={(event) => updateManualItem(idx, "quantity", event.target.value)}
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={item.price}
+                  onChange={(event) => updateManualItem(idx, "price", event.target.value)}
+                />
+                <input
+                  type="text"
+                  list="manual-category-suggestions"
+                  value={item.category}
+                  onChange={(event) => updateManualItem(idx, "category", event.target.value)}
+                  placeholder="kategória"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeManualItem(idx)}
+                  disabled={manualItems.length === 1}
+                >
+                  Odstrániť
+                </button>
+              </div>
+            ))}
+            <datalist id="manual-category-suggestions">
+              {manualCategorySuggestions.map((category) => (
+                <option value={category} key={category} />
+              ))}
+            </datalist>
+          </div>
+          <div className="manual-items-actions">
+            <button type="button" onClick={addManualItem}>
+              Pridať položku
+            </button>
+            <div className="manual-total">
+              Spolu: <strong>{formatCurrency(manualItemsTotal)}</strong>
+            </div>
+          </div>
+          <button type="button" onClick={saveManualEntry} disabled={historyBusy || manualItemsTotal === 0}>
+            {historyBusy ? "Ukladám..." : "Uložiť ručný záznam"}
+          </button>
+          <p className="muted">
+            Pridaj aspoň jednu položku s cenou. Záznam sa uloží do histórie rovnako ako bločky.
+          </p>
         </div>
 
         {history.length === 0 ? (
