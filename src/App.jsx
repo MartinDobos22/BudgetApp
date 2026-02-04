@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const currencyFormatter = new Intl.NumberFormat("sk-SK", {
   style: "currency",
@@ -433,32 +433,38 @@ export default function App() {
     }
   }
 
-  function onPickFile(e) {
-    const f = e.target.files?.[0] || null;
-    console.log("[FE] file selected", { name: f?.name, size: f?.size });
-    setFile(f);
+  const cameraInputRef = useRef(null);
+
+  function handlePickedFile(nextFile) {
+    console.log("[FE] file selected", { name: nextFile?.name, size: nextFile?.size });
+    setFile(nextFile);
     setResp(null);
 
     if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(f ? URL.createObjectURL(f) : null);
+    setPreviewUrl(nextFile ? URL.createObjectURL(nextFile) : null);
   }
 
-  async function onSend() {
-    if (!file) return;
+  function onPickFile(e) {
+    const nextFile = e.target.files?.[0] || null;
+    handlePickedFile(nextFile);
+  }
+
+  async function onSend(selectedFile = file) {
+    if (!selectedFile) return;
     setBusy(true);
     setResp(null);
     const requestId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
     const startedAt = performance.now();
     console.log("[FE] sending receipt to backend", {
       requestId,
-      name: file?.name,
-      size: file?.size,
-      type: file?.type,
+      name: selectedFile?.name,
+      size: selectedFile?.size,
+      type: selectedFile?.type,
     });
 
     try {
       const fd = new FormData();
-      fd.append("image", file);
+      fd.append("image", selectedFile);
 
       const r = await fetch("/api/receipt", {
         method: "POST",
@@ -493,6 +499,18 @@ export default function App() {
     }
   }
 
+  function onCaptureClick() {
+    cameraInputRef.current?.click();
+  }
+
+  async function onCaptureFile(e) {
+    const nextFile = e.target.files?.[0] || null;
+    handlePickedFile(nextFile);
+    if (nextFile) {
+      await onSend(nextFile);
+    }
+  }
+
   return (
     <div className="wrap">
       <header className="header">
@@ -506,6 +524,18 @@ export default function App() {
       <section className="card">
         <div className="row">
           <input type="file" accept="image/*" onChange={onPickFile} disabled={busy} />
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={onCaptureFile}
+            disabled={busy}
+            style={{ display: "none" }}
+          />
+          <button type="button" onClick={onCaptureClick} disabled={busy}>
+            Odfotiť bloček
+          </button>
           <button onClick={onSend} disabled={!file || busy}>
             {busy ? "Spracúvam..." : "Odoslať fotku a získať JSON"}
           </button>
