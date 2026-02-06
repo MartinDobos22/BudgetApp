@@ -1,3 +1,5 @@
+import LineChart from "./LineChart";
+
 export default function HistorySection({
   history,
   historyBusy,
@@ -31,6 +33,8 @@ export default function HistorySection({
   totalsByMonth,
   formatCurrency,
 }) {
+  const categoryChartData = categorySummaryRows.map(([label, total]) => ({ label, total }));
+
   return (
     <section className="card">
       <div className="history-header">
@@ -162,6 +166,48 @@ export default function HistorySection({
               <p className="summary-value">
                 {formatCurrency(history.reduce((sum, entry) => sum + (Number(entry?.totalPrice) || 0), 0))}
               </p>
+            </div>
+          </div>
+
+          <div className="receipt-section">
+            <h4>Grafy výdavkov</h4>
+            <div className="chart-grid">
+              <div className="chart-card">
+                <p className="muted">Denne</p>
+                <LineChart
+                  data={totalsByDay}
+                  ariaLabel="Graf výdavkov podľa dní"
+                  valueFormatter={formatCurrency}
+                />
+              </div>
+              <div className="chart-card">
+                <p className="muted">Týždenne</p>
+                <LineChart
+                  data={totalsByWeek}
+                  ariaLabel="Graf výdavkov podľa týždňov"
+                  valueFormatter={formatCurrency}
+                />
+              </div>
+              <div className="chart-card">
+                <p className="muted">Mesačne</p>
+                <LineChart
+                  data={totalsByMonth}
+                  ariaLabel="Graf výdavkov podľa mesiacov"
+                  valueFormatter={formatCurrency}
+                />
+              </div>
+              <div className="chart-card">
+                <p className="muted">
+                  Kategórie
+                  {selectedMainCategory !== "all" && ` · ${selectedMainCategory}`}
+                  {selectedSubCategory !== "all" && ` / ${selectedSubCategory}`}
+                </p>
+                <LineChart
+                  data={categoryChartData}
+                  ariaLabel="Graf výdavkov podľa kategórií"
+                  valueFormatter={formatCurrency}
+                />
+              </div>
             </div>
           </div>
 
