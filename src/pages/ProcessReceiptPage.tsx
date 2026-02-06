@@ -1,10 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Snackbar, Stack, Typography } from "@mui/material";
+import {
+  Alert,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Snackbar,
+  Stack,
+  Typography,
+} from "@mui/material";
 import UploadCard from "../components/UploadCard";
 import ReceiptOutput from "../components/ReceiptOutput";
 import { Receipt, ReceiptItem } from "../models/receipt";
 import { parseReceipt, categorizeItems } from "../services/mockApi";
 import { MERCHANT_GROUPS } from "../utils/categories";
+import { formatCurrency, formatDate } from "../utils/formatters";
 
 interface ProcessReceiptPageProps {
   history: Receipt[];
@@ -22,6 +33,28 @@ export default function ProcessReceiptPage({ history, onSaveReceipt }: ProcessRe
   const [note, setNote] = useState("");
   const [merchantGroup, setMerchantGroup] = useState(MERCHANT_GROUPS[0] ?? "");
   const [snackbar, setSnackbar] = useState<{ message: string; severity: "success" | "error" } | null>(null);
+  const [duplicateReceipt, setDuplicateReceipt] = useState<Receipt | null>(null);
+
+  const getRawSignature = (raw: unknown) => {
+    if (!raw || typeof raw !== "object") return null;
+    const typed = raw as { fileName?: unknown; size?: unknown; mime?: unknown };
+    if (typeof typed.fileName !== "string" || typeof typed.size !== "number") return null;
+    return `${typed.fileName}-${typed.size}-${typeof typed.mime === "string" ? typed.mime : ""}`;
+  };
+
+  const findDuplicateReceipt = (candidate: Receipt) => {
+    const candidateSignature = getRawSignature(candidate.raw);
+    return history.find((existing) => {
+      if (existing.id === candidate.id) return true;
+      const existingSignature = getRawSignature(existing.raw);
+      if (candidateSignature && existingSignature && candidateSignature === existingSignature) return true;
+      return (
+        existing.merchant === candidate.merchant &&
+        existing.date === candidate.date &&
+        existing.total === candidate.total
+      );
+    });
+  };
 
   useEffect(() => {
     if (!receipt) return;
@@ -40,6 +73,7 @@ export default function ProcessReceiptPage({ history, onSaveReceipt }: ProcessRe
     setFile(nextFile);
     setError(null);
     setReceipt(null);
+    setDuplicateReceipt(null);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
     setPreviewUrl(nextFile ? URL.createObjectURL(nextFile) : null);
   };
@@ -56,8 +90,14 @@ export default function ProcessReceiptPage({ history, onSaveReceipt }: ProcessRe
     setBusy(true);
     setError(null);
     setReceipt(null);
+    setDuplicateReceipt(null);
     try {
       const result = await parseReceipt(selectedFile);
+      const duplicate = findDuplicateReceipt(result);
+      if (duplicate) {
+        setDuplicateReceipt(duplicate);
+        return;
+      }
       setReceipt(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Neznáma chyba pri spracovaní.");
@@ -135,6 +175,30 @@ export default function ProcessReceiptPage({ history, onSaveReceipt }: ProcessRe
         onApplyCategorization={handleCategorize}
         onSave={handleSave}
       />
+
+      <Dialog open={Boolean(duplicateReceipt)} onClose={() => setDuplicateReceipt(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Bloček už máte uložený</DialogTitle>
+        <DialogContent>
+          <Stack spacing={1.5}>
+            <Typography>
+              Tento QR bloček už máte v histórii. Skúste prosím naskenovať iný bloček.
+            </Typography>
+            {duplicateReceipt && (
+              <Stack spacing={0.5}>
+                <Typography variant="subtitle2">{duplicateReceipt.merchant}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {formatDate(duplicateReceipt.date)} • {formatCurrency(duplicateReceipt.total, duplicateReceipt.currency)}
+                </Typography>
+              </Stack>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="contained" onClick={() => setDuplicateReceipt(null)}>
+            Rozumiem
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar open={Boolean(snackbar)} autoHideDuration={4000} onClose={() => setSnackbar(null)}>
         <Alert severity={snackbar?.severity ?? "success"} onClose={() => setSnackbar(null)}>
