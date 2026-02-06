@@ -149,6 +149,14 @@ export default function App() {
     return Array.from(categories);
   }, [history]);
 
+  const receiptCategorySuggestions = useMemo(() => {
+    const categories = new Set(manualCategorySuggestions);
+    categorizedItems.forEach((item) => {
+      if (item?.category) categories.add(item.category);
+    });
+    return Array.from(categories);
+  }, [categorizedItems, manualCategorySuggestions]);
+
   const manualItemsTotal = useMemo(
     () => manualItems.reduce((sum, item) => sum + (Number(item?.price) || 0), 0),
     [manualItems],
@@ -245,7 +253,7 @@ export default function App() {
       name: item?.name || "-",
       quantity: Number(item?.quantity) || 0,
       price: Number(item?.price) || 0,
-      category: item?.category || UNCATEGORIZED_LABEL,
+      category: item?.category?.trim() || UNCATEGORIZED_LABEL,
     }));
     const entry = {
       id: `${Date.now()}`,
@@ -449,6 +457,7 @@ export default function App() {
         organization={organization}
         unit={unit}
         categorizedItems={categorizedItems}
+        categorySuggestions={receiptCategorySuggestions}
         totalPrice={totalPrice}
         totalItems={totalItems}
         vatSummary={vatSummary}
