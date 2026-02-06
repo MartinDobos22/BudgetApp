@@ -4,6 +4,7 @@ export default function ReceiptOutput({
   organization,
   unit,
   categorizedItems,
+  categorySuggestions,
   totalPrice,
   totalItems,
   vatSummary,
@@ -126,9 +127,11 @@ export default function ReceiptOutput({
                 </div>
               ))}
               <datalist id="category-suggestions">
-                {[...new Set(categorizedItems.map((item) => item?.category).filter(Boolean))].map((category) => (
-                  <option value={category} key={category} />
-                ))}
+                {(categorySuggestions || [])
+                  .filter(Boolean)
+                  .map((category) => (
+                    <option value={category} key={category} />
+                  ))}
               </datalist>
               <div className="items-actions">
                 <button type="button" onClick={onApplyAutoCategories}>
