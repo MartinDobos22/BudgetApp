@@ -161,7 +161,7 @@ export default function UploadCard({ file, previewUrl, busy, onFileChange, onCap
         </Stack>
       </CardContent>
       <CardActions sx={{ px: 3, pb: 3 }}>
-        <Button variant="contained" onClick={onProcess} disabled={!file || busy} fullWidth>
+        <Button variant="contained" onClick={() => onProcess()} disabled={!file || busy} fullWidth>
           Spracovať
         </Button>
       </CardActions>
