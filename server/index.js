@@ -27,12 +27,14 @@ const upload = multer({
 });
 
 app.get("/api/health", (req, res) => {
+  logStep("health", "Health check");
   res.json({ ok: true, service: "qr-blocek-opd-backend" });
 });
 
 app.get("/api/receipts", (req, res) => {
   try {
     const receipts = readReceiptsFile();
+    logStep("receipts", "Listed receipts", { count: receipts.length });
     return res.json({ ok: true, receipts });
   } catch (error) {
     logStep("receipts", "Failed to list receipts", { error: error?.message || String(error) });
@@ -43,6 +45,7 @@ app.get("/api/receipts", (req, res) => {
 app.post("/api/receipts", (req, res) => {
   try {
     const payload = normalizeReceiptPayload(req.body || {});
+    logStep("receipts", "Saving receipt", { id: payload.id, merchant: payload.merchant, total: payload.total });
     const receipts = readReceiptsFile();
     const filtered = receipts.filter((receipt) => receipt.id !== payload.id);
     const next = [payload, ...filtered].sort(
@@ -59,6 +62,7 @@ app.post("/api/receipts", (req, res) => {
 app.delete("/api/receipts", (req, res) => {
   try {
     writeReceiptsFile([]);
+    logStep("receipts", "Cleared receipts");
     return res.json({ ok: true });
   } catch (error) {
     logStep("receipts", "Failed to clear receipts", { error: error?.message || String(error) });
@@ -68,7 +72,12 @@ app.delete("/api/receipts", (req, res) => {
 
 app.post("/api/receipt", upload.single("image"), async (req, res) => {
   const requestId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-  logStep("receipt", "Incoming request", { requestId });
+  const startedAt = Date.now();
+  logStep("receipt", "Incoming request", {
+    requestId,
+    contentType: req.headers["content-type"],
+    userAgent: req.headers["user-agent"],
+  });
   try {
     if (!req.file) {
       logStep("receipt", "Missing file", { requestId });
@@ -79,7 +88,12 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
       });
     }
 
-    logStep("receipt", "Decoding QR", { requestId, fileSize: req.file.size, fileType: req.file.mimetype });
+    logStep("receipt", "Decoding QR", {
+      requestId,
+      fileSize: req.file.size,
+      fileType: req.file.mimetype,
+      originalName: req.file.originalname,
+    });
     const qrResult = await decodeQrFromBuffer(req.file.buffer, {
       googleVisionApiKey: GOOGLE_VISION_API_KEY,
       logStep,
@@ -103,6 +117,8 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
     });
     const { lookup, debug: lookupDebug } = buildLookupPayload(qrText, {
       includeExtracted: qrResult.source?.startsWith("ocr"),
+      logStep,
+      requestId,
     });
     if (!lookup) {
       logStep("receipt", "Unsupported QR format", { requestId, lookupDebug });
@@ -119,7 +135,12 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
       });
     }
 
-    logStep("receipt", "Lookup payload ready", { requestId, type: lookup.type, strategy: lookupDebug?.strategy });
+    logStep("receipt", "Lookup payload ready", {
+      requestId,
+      type: lookup.type,
+      strategy: lookupDebug?.strategy,
+      extracted: lookupDebug?.extracted ?? null,
+    });
     const cacheKey =
       lookup.type === "online"
         ? `online:${lookup.payload.receiptId}`
@@ -129,7 +150,11 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
     if (cached) {
       logStep("receipt", "Cache hit", { requestId });
       const aiResult = await categorizeItemsWithOpenAI(cached, { OPENAI_API_KEY, OPENAI_MODEL, logStep });
-      logStep("receipt", "Returning cached response", { requestId });
+      logStep("receipt", "Returning cached response", {
+        requestId,
+        aiCategories: aiResult?.categories?.length || 0,
+        elapsedMs: Date.now() - startedAt,
+      });
       return res.json({
         ok: true,
         qrText,
@@ -143,13 +168,17 @@ app.post("/api/receipt", upload.single("image"), async (req, res) => {
       });
     }
 
-    logStep("receipt", "Fetching receipt from FS", { requestId });
-    const fsJson = await fetchReceiptFromFS(lookup.payload);
-    logStep("receipt", "FS response received", { requestId });
+    logStep("receipt", "Fetching receipt from FS", { requestId, lookupType: lookup.type });
+    const fsJson = await fetchReceiptFromFS(lookup.payload, { logStep, requestId });
+    logStep("receipt", "FS response received", { requestId, hasReceipt: Boolean(fsJson?.receipt) });
     cacheSet(cacheKey, fsJson);
 
     const aiResult = await categorizeItemsWithOpenAI(fsJson, { OPENAI_API_KEY, OPENAI_MODEL, logStep });
-    logStep("receipt", "Returning response", { requestId, aiCategories: aiResult?.categories?.length || 0 });
+    logStep("receipt", "Returning response", {
+      requestId,
+      aiCategories: aiResult?.categories?.length || 0,
+      elapsedMs: Date.now() - startedAt,
+    });
     res.json({
       ok: true,
       qrText,

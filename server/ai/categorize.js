@@ -68,10 +68,14 @@ FORMÁT VÝSTUPU:
 `.trim();
 
 export async function categorizeItemsWithOpenAI(fsJson, { OPENAI_API_KEY, OPENAI_MODEL, logStep } = {}) {
-  if (!OPENAI_API_KEY) return { categories: null, debug: { skipped: true, reason: "missing_api_key" } };
+  if (!OPENAI_API_KEY) {
+    logStep?.("ai", "Skipping categorize: missing API key");
+    return { categories: null, debug: { skipped: true, reason: "missing_api_key" } };
+  }
 
   const items = fsJson?.receipt?.items || [];
   if (!Array.isArray(items) || items.length === 0) {
+    logStep?.("ai", "Skipping categorize: no items");
     return { categories: [], debug: { skipped: true, reason: "no_items" } };
   }
 
@@ -139,13 +143,22 @@ export async function categorizeItemsWithOpenAI(fsJson, { OPENAI_API_KEY, OPENAI
 
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
+    logStep?.("ai", "Categorize request failed", { status: resp.status, error: data?.error || data });
     return { categories: null, debug: { status: resp.status, error: data?.error || data, requestPayload: payload } };
   }
 
   const content = data?.choices?.[0]?.message?.content;
+  logStep?.("ai", "Categorize response received", {
+    model: data?.model,
+    usage: data?.usage || null,
+    finishReason: data?.choices?.[0]?.finish_reason || null,
+  });
   const parsed = JSON.parse(extractJsonFromOpenAI(content));
   const list = parsed?.results;
-  if (!Array.isArray(list)) return { categories: null, debug: { error: "invalid_format", raw: parsed } };
+  if (!Array.isArray(list)) {
+    logStep?.("ai", "Categorize response invalid format", { parsed });
+    return { categories: null, debug: { error: "invalid_format", raw: parsed } };
+  }
 
   const byId = new Map(list.map((x) => [x.id, sanitizeKey(x.categoryKey)]));
 
@@ -160,5 +173,6 @@ export async function categorizeItemsWithOpenAI(fsJson, { OPENAI_API_KEY, OPENAI
     };
   });
 
+  logStep?.("ai", "Categorize completed", { items: categories.length });
   return { categories, debug: { rawResponse: content, parsedModelOutput: parsed } };
 }

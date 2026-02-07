@@ -177,39 +177,62 @@ function extractOfflinePayloadFromText(qrText) {
   };
 }
 
-export function buildLookupPayload(qrTextRaw, { includeExtracted = false } = {}) {
+export function buildLookupPayload(qrTextRaw, { includeExtracted = false, logStep, requestId } = {}) {
   const qrText = stripControlChars(qrTextRaw, { preserveNewlines: true });
   const extracted = includeExtracted ? extractOfflinePayloadFromText(qrText) : null;
   const debug = {
     normalizedPreview: qrText.replace(/\s+/g, " ").slice(0, 160),
     extracted: extracted?.debug || null,
   };
+  logStep?.("opd", "Lookup payload: normalized text prepared", {
+    requestId,
+    includeExtracted,
+    preview: debug.normalizedPreview,
+  });
 
   const receiptId = extractOnlineReceiptIdFromAnything(qrText);
   if (receiptId) {
+    logStep?.("opd", "Lookup payload: online receipt id detected", { requestId, receiptId });
     return { lookup: { type: "online", payload: { receiptId } }, debug: { ...debug, strategy: "online" } };
   }
 
   const offline = parseOfflinePayloadFromColonText(qrText);
   if (offline) {
+    logStep?.("opd", "Lookup payload: offline colon detected", {
+      requestId,
+      okp: offline.okp,
+      cashRegisterCode: offline.cashRegisterCode,
+      issueDateFormatted: offline.issueDateFormatted,
+      receiptNumber: offline.receiptNumber,
+      totalAmount: offline.totalAmount,
+    });
     return { lookup: { type: "offline", payload: offline }, debug: { ...debug, strategy: "offline_colon" } };
   }
 
   const extractedFromText = extracted || extractOfflinePayloadFromText(qrText);
   if (extractedFromText?.payload) {
+    logStep?.("opd", "Lookup payload: offline extracted from text", {
+      requestId,
+      okp: extractedFromText.payload.okp,
+      cashRegisterCode: extractedFromText.payload.cashRegisterCode,
+      issueDateFormatted: extractedFromText.payload.issueDateFormatted,
+      receiptNumber: extractedFromText.payload.receiptNumber,
+      totalAmount: extractedFromText.payload.totalAmount,
+    });
     return {
       lookup: { type: "offline", payload: extractedFromText.payload },
       debug: { ...debug, strategy: "offline_text", extracted: extractedFromText?.debug || null },
     };
   }
 
+  logStep?.("opd", "Lookup payload: unsupported", { requestId, extracted: extractedFromText?.debug || null });
   return {
     lookup: null,
     debug: { ...debug, strategy: "unsupported", extracted: extractedFromText?.debug || null },
   };
 }
 
-export async function fetchReceiptFromFS(lookupPayload) {
+export async function fetchReceiptFromFS(lookupPayload, { logStep, requestId } = {}) {
   const headers = {
     "Content-Type": "application/json",
     Accept: "application/json, text/plain, */*",
@@ -218,6 +241,7 @@ export async function fetchReceiptFromFS(lookupPayload) {
     Referer: "https://ekasa.financnasprava.sk/mdu/opd/",
   };
 
+  logStep?.("opd", "FS OPD request", { requestId, payload: lookupPayload });
   const resp = await fetchWithTimeout(OPD_URL, {
     method: "POST",
     headers,
@@ -233,6 +257,11 @@ export async function fetchReceiptFromFS(lookupPayload) {
   }
 
   if (!resp.ok) {
+    logStep?.("opd", "FS OPD error response", {
+      requestId,
+      status: resp.status,
+      error: data?.errorDescription || data?.message || text,
+    });
     const msg = data?.errorDescription || data?.message || text || `HTTP ${resp.status}`;
     const err = new Error(`FS OPD failed: ${msg}`);
     err.status = resp.status;
@@ -240,6 +269,11 @@ export async function fetchReceiptFromFS(lookupPayload) {
     throw err;
   }
 
+  logStep?.("opd", "FS OPD success response", {
+    requestId,
+    receiptId: data?.receipt?.receiptId || null,
+    items: data?.receipt?.items?.length || 0,
+  });
   return data;
 }
 
