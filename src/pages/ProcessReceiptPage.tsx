@@ -13,7 +13,7 @@ import {
 import UploadCard from "../components/UploadCard";
 import ReceiptOutput from "../components/ReceiptOutput";
 import { Receipt, ReceiptItem } from "../models/receipt";
-import { parseReceipt, categorizeItems } from "../services/mockApi";
+import { parseReceipt, categorizeItems } from "../services/receiptApi";
 import { MERCHANT_GROUPS } from "../utils/categories";
 import { formatCurrency, formatDate } from "../utils/formatters";
 
