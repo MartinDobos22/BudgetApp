@@ -352,8 +352,12 @@ async function decodeWithGoogleVision(buffer, { apiKey, logStep }) {
 
   try {
     const variants = await buildOcrVariants(buffer);
+    logStep?.("ocr", "Google Vision OCR variants prepared", {
+      variants: variants.map((variant) => variant.label),
+    });
 
     for (const variant of variants) {
+      logStep?.("ocr", "Google Vision OCR request", { variant: variant.label, bytes: variant.buffer.length });
       const resp = await fetchWithTimeout(
         `https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`,
         {
@@ -372,6 +376,7 @@ async function decodeWithGoogleVision(buffer, { apiKey, logStep }) {
       );
 
       if (!resp.ok) {
+        logStep?.("ocr", "Google Vision OCR HTTP error", { variant: variant.label, status: resp.status });
         continue;
       }
 
@@ -397,6 +402,11 @@ async function decodeWithGoogleVision(buffer, { apiKey, logStep }) {
 
 export async function decodeQrFromBuffer(buffer, { googleVisionApiKey, logStep } = {}) {
   const img = await Jimp.read(buffer);
+  logStep?.("qr", "QR decode start", {
+    bytes: buffer.length,
+    width: img.bitmap.width,
+    height: img.bitmap.height,
+  });
   const roiDetectionImage = img.clone().greyscale().normalize();
   const roi = findQrRoi(roiDetectionImage);
 
@@ -451,11 +461,18 @@ export async function decodeQrFromBuffer(buffer, { googleVisionApiKey, logStep }
 
     for (const variant of roiVariants) {
       try {
+        logStep?.("qr", "Trying ROI variant", { variant: variant.label });
         const variantImage = variant.make();
         const jsQrText = decodeWithJsQr(variantImage);
-        if (jsQrText) return { text: jsQrText, source: "qr-jsqr", variant: variant.label };
+        if (jsQrText) {
+          logStep?.("qr", "QR decoded with jsQR (ROI)", { variant: variant.label });
+          return { text: jsQrText, source: "qr-jsqr", variant: variant.label };
+        }
         const readerText = await decodeWithQrReader(variantImage);
-        if (readerText) return { text: readerText, source: "qr-reader", variant: variant.label };
+        if (readerText) {
+          logStep?.("qr", "QR decoded with qrcode-reader (ROI)", { variant: variant.label });
+          return { text: readerText, source: "qr-reader", variant: variant.label };
+        }
       } catch {}
     }
   } else {
@@ -554,21 +571,31 @@ export async function decodeQrFromBuffer(buffer, { googleVisionApiKey, logStep }
 
   for (const variant of variants) {
     try {
+      logStep?.("qr", "Trying full-image variant", { variant: variant.label });
       const variantImage = variant.make();
       const jsQrText = decodeWithJsQr(variantImage);
-      if (jsQrText) return { text: jsQrText, source: "qr-jsqr", variant: variant.label };
+      if (jsQrText) {
+        logStep?.("qr", "QR decoded with jsQR (full)", { variant: variant.label });
+        return { text: jsQrText, source: "qr-jsqr", variant: variant.label };
+      }
       const readerText = await decodeWithQrReader(variantImage);
-      if (readerText) return { text: readerText, source: "qr-reader", variant: variant.label };
+      if (readerText) {
+        logStep?.("qr", "QR decoded with qrcode-reader (full)", { variant: variant.label });
+        return { text: readerText, source: "qr-reader", variant: variant.label };
+      }
     } catch {}
   }
 
   if (googleVisionApiKey) {
+    logStep?.("qr", "Falling back to Google Vision OCR");
     const ocrResult = await decodeWithGoogleVision(buffer, { apiKey: googleVisionApiKey, logStep });
     if (ocrResult?.text) {
       const source = ocrResult.source === "barcode" ? "ocr-barcode" : "ocr-text";
+      logStep?.("qr", "OCR decoded text", { source, variant: ocrResult.variant });
       return { text: ocrResult.text, source, variant: ocrResult.variant || "google_vision" };
     }
   }
 
+  logStep?.("qr", "QR decode failed after all variants");
   return null;
 }

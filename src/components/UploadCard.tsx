@@ -29,7 +29,15 @@ export default function UploadCard({ file, previewUrl, busy, onFileChange, onCap
 
   const handleFile = (selected: File | null) => {
     if (selected) {
+      console.info("[upload] File selected", {
+        name: selected.name,
+        size: selected.size,
+        type: selected.type,
+        lastModified: selected.lastModified,
+      });
       onFileChange(selected);
+    } else {
+      console.warn("[upload] No file selected");
     }
   };
 
@@ -38,6 +46,11 @@ export default function UploadCard({ file, previewUrl, busy, onFileChange, onCap
       event.preventDefault();
       setIsDragging(false);
       const dropped = event.dataTransfer.files?.[0];
+      console.info("[upload] File dropped", {
+        name: dropped?.name,
+        size: dropped?.size,
+        type: dropped?.type,
+      });
       handleFile(dropped ?? null);
     },
     [onFileChange],
@@ -52,9 +65,15 @@ export default function UploadCard({ file, previewUrl, busy, onFileChange, onCap
           <Box
             onDragOver={(event) => {
               event.preventDefault();
+              if (!isDragging) {
+                console.info("[upload] Drag over");
+              }
               setIsDragging(true);
             }}
-            onDragLeave={() => setIsDragging(false)}
+            onDragLeave={() => {
+              console.info("[upload] Drag leave");
+              setIsDragging(false);
+            }}
             onDrop={handleDrop}
             sx={{
               border: "2px dashed",
@@ -76,7 +95,10 @@ export default function UploadCard({ file, previewUrl, busy, onFileChange, onCap
               <Button
                 variant="contained"
                 startIcon={<UploadFile />}
-                onClick={() => inputRef.current?.click()}
+                onClick={() => {
+                  console.info("[upload] Click select file");
+                  inputRef.current?.click();
+                }}
                 disabled={busy}
               >
                 Vybrať súbor
@@ -84,7 +106,10 @@ export default function UploadCard({ file, previewUrl, busy, onFileChange, onCap
               <Button
                 variant="outlined"
                 startIcon={<PhotoCamera />}
-                onClick={() => captureRef.current?.click()}
+                onClick={() => {
+                  console.info("[upload] Click capture");
+                  captureRef.current?.click();
+                }}
                 disabled={busy}
               >
                 Použiť kameru
@@ -95,7 +120,10 @@ export default function UploadCard({ file, previewUrl, busy, onFileChange, onCap
               type="file"
               accept="image/*"
               hidden
-              onChange={(event) => handleFile(event.target.files?.[0] ?? null)}
+              onChange={(event) => {
+                console.info("[upload] File input changed");
+                handleFile(event.target.files?.[0] ?? null);
+              }}
             />
             <input
               ref={captureRef}
@@ -103,7 +131,10 @@ export default function UploadCard({ file, previewUrl, busy, onFileChange, onCap
               accept="image/*"
               capture="environment"
               hidden
-              onChange={(event) => onCapture(event.target.files?.[0] ?? null)}
+              onChange={(event) => {
+                console.info("[upload] Capture input changed");
+                onCapture(event.target.files?.[0] ?? null);
+              }}
             />
           </Box>
 

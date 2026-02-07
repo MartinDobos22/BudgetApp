@@ -70,15 +70,24 @@ export default function ProcessReceiptPage({ history, onSaveReceipt }: ProcessRe
   }, [previewUrl]);
 
   const handleFileChange = (nextFile: File | null) => {
+    console.info("[process] File change", {
+      name: nextFile?.name,
+      size: nextFile?.size,
+      type: nextFile?.type,
+      lastModified: nextFile?.lastModified,
+    });
     setFile(nextFile);
     setError(null);
     setReceipt(null);
     setDuplicateReceipt(null);
     if (previewUrl) URL.revokeObjectURL(previewUrl);
-    setPreviewUrl(nextFile ? URL.createObjectURL(nextFile) : null);
+    const nextPreview = nextFile ? URL.createObjectURL(nextFile) : null;
+    console.info("[process] Preview URL updated", { hasPreview: Boolean(nextPreview) });
+    setPreviewUrl(nextPreview);
   };
 
   const handleCapture = (nextFile: File | null) => {
+    console.info("[process] Capture input", { captured: Boolean(nextFile) });
     handleFileChange(nextFile);
     if (nextFile) {
       void handleProcess(nextFile);
@@ -86,43 +95,69 @@ export default function ProcessReceiptPage({ history, onSaveReceipt }: ProcessRe
   };
 
   const handleProcess = async (selectedFile = file) => {
-    if (!selectedFile) return;
+    if (!selectedFile) {
+      console.warn("[process] Missing file for processing");
+      return;
+    }
+    const startedAt = performance.now();
+    console.info("[process] Starting receipt parsing", {
+      name: selectedFile.name,
+      size: selectedFile.size,
+      type: selectedFile.type,
+    });
     setBusy(true);
     setError(null);
     setReceipt(null);
     setDuplicateReceipt(null);
     try {
       const result = await parseReceipt(selectedFile);
+      console.info("[process] Receipt parsed", {
+        id: result.id,
+        merchant: result.merchant,
+        total: result.total,
+        items: result.items.length,
+        source: result.source,
+        parseTimeMs: Math.round(performance.now() - startedAt),
+        qrMeta: result.qrMeta,
+      });
       const duplicate = findDuplicateReceipt(result);
       if (duplicate) {
+        console.warn("[process] Duplicate receipt detected", { id: duplicate.id, merchant: duplicate.merchant });
         setDuplicateReceipt(duplicate);
         return;
       }
       setReceipt(result);
     } catch (err) {
+      console.error("[process] Parsing failed", err);
       setError(err instanceof Error ? err.message : "Neznáma chyba pri spracovaní.");
     } finally {
+      console.info("[process] Parsing finished", { busy: false });
       setBusy(false);
     }
   };
 
   const handleCategorize = async () => {
+    console.info("[process] Categorization started", { items: items.length });
     setCategorizeBusy(true);
     try {
       const updated = await categorizeItems(items);
+      console.info("[process] Categorization done", { items: updated.length });
       setItems(updated);
       setSnackbar({ message: "Kategórie boli doplnené.", severity: "success" });
     } catch (err) {
+      console.error("[process] Categorization failed", err);
       setSnackbar({
         message: err instanceof Error ? err.message : "Kategorizácia zlyhala.",
         severity: "error",
       });
     } finally {
+      console.info("[process] Categorization finished", { busy: false });
       setCategorizeBusy(false);
     }
   };
 
   const handleItemCategoryChange = (id: string, main: string, sub: string) => {
+    console.info("[process] Item category changed", { id, main, sub });
     setItems((prev) =>
       prev.map((item) => (item.id === id ? { ...item, categoryMain: main, categorySub: sub } : item)),
     );
@@ -130,6 +165,7 @@ export default function ProcessReceiptPage({ history, onSaveReceipt }: ProcessRe
 
   const handleSave = () => {
     if (!receipt) return;
+    console.info("[process] Saving receipt", { id: receipt.id, items: items.length, merchantGroup, note });
     const updatedReceipt: Receipt = {
       ...receipt,
       items,

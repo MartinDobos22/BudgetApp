@@ -49,8 +49,15 @@ const randomItem = (): ReceiptItem => {
 export const parseReceipt = (file: File): Promise<Receipt> =>
   new Promise((resolve, reject) => {
     const delay = randomDelay(1200, 2200);
+    console.info("[mockApi] parseReceipt scheduled", {
+      fileName: file.name,
+      size: file.size,
+      type: file.type,
+      delayMs: delay,
+    });
     setTimeout(() => {
       if (Math.random() < 0.12) {
+        console.warn("[mockApi] parseReceipt simulated failure");
         reject(new Error("Nepodarilo sa prečítať QR kód. Skúste lepšie svetlo alebo ostrejší záber."));
         return;
       }
@@ -84,6 +91,13 @@ export const parseReceipt = (file: File): Promise<Receipt> =>
         },
       };
 
+      console.info("[mockApi] parseReceipt generated receipt", {
+        id: receipt.id,
+        merchant: receipt.merchant,
+        total: receipt.total,
+        items: receipt.items.length,
+        warnings: receipt.qrMeta?.warnings?.length ?? 0,
+      });
       resolve(receipt);
     }, delay);
   });
@@ -91,8 +105,10 @@ export const parseReceipt = (file: File): Promise<Receipt> =>
 export const categorizeItems = (items: ReceiptItem[]): Promise<ReceiptItem[]> =>
   new Promise((resolve, reject) => {
     const delay = randomDelay(700, 1200);
+    console.info("[mockApi] categorizeItems scheduled", { items: items.length, delayMs: delay });
     setTimeout(() => {
       if (Math.random() < 0.18) {
+        console.warn("[mockApi] categorizeItems simulated failure");
         reject(new Error("AI kategorizácia dočasne zlyhala. Skúste to znova o chvíľu."));
         return;
       }
@@ -110,6 +126,7 @@ export const categorizeItems = (items: ReceiptItem[]): Promise<ReceiptItem[]> =>
         };
       });
 
+      console.info("[mockApi] categorizeItems updated", { items: updated.length });
       resolve(updated);
     }, delay);
   });
