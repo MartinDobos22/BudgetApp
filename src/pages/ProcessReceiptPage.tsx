@@ -140,7 +140,7 @@ export default function ProcessReceiptPage({ history, onSaveReceipt }: ProcessRe
     console.info("[process] Categorization started", { items: items.length });
     setCategorizeBusy(true);
     try {
-      const updated = await categorizeItems(items);
+      const updated = await categorizeItems(items, receipt?.aiCategories);
       console.info("[process] Categorization done", { items: updated.length });
       setItems(updated);
       setSnackbar({ message: "Kategórie boli doplnené.", severity: "success" });

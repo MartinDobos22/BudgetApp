@@ -1,5 +1,5 @@
 import { CATEGORY_TREE } from "../utils/categories";
-import { Receipt, ReceiptItem } from "../models/receipt";
+import { AiCategory, Receipt, ReceiptItem } from "../models/receipt";
 
 const receiptCache = new Map<string, Receipt>();
 
@@ -53,6 +53,50 @@ const buildReceiptItem = (item: Record<string, unknown>, idx: number, fallbackId
   };
 };
 
+const normalizeText = (value: string): string =>
+  value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+const getDefaultSub = (main?: string): string => (main ? CATEGORY_TREE[main]?.[0] ?? "" : "");
+
+const findCategoryForLabel = (label: string): { main: string; sub: string } | null => {
+  const normalizedLabel = normalizeText(label);
+  if (!normalizedLabel) return null;
+  if (normalizedLabel === "ine" || normalizedLabel === "other") {
+    return { main: "Iné", sub: getDefaultSub("Iné") };
+  }
+
+  for (const [main, subs] of Object.entries(CATEGORY_TREE)) {
+    for (const sub of subs) {
+      const parts = sub.split("/").map((part) => normalizeText(part));
+      if (parts.some((part) => part && normalizedLabel.includes(part))) {
+        return { main, sub };
+      }
+    }
+  }
+
+  return null;
+};
+
+const mapAiCategoriesToItems = (items: ReceiptItem[], aiCategories: AiCategory[] | null | undefined): ReceiptItem[] => {
+  if (!Array.isArray(aiCategories) || aiCategories.length === 0) return items;
+  const byId = new Map(aiCategories.map((entry) => [entry.id, entry]));
+  return items.map((item, idx) => {
+    const match = byId.get(idx);
+    if (!match) return item;
+    const mapped = findCategoryForLabel(match.category);
+    if (!mapped) return item;
+    return {
+      ...item,
+      categoryMain: mapped.main,
+      categorySub: mapped.sub,
+    };
+  });
+};
+
 const mapReceiptResponse = (data: Record<string, any>, file: File, durationMs: number): Receipt => {
   const receipt = data?.fsJson?.receipt ?? {};
   const receiptId = receipt?.receiptId ?? data?.lookup?.payload?.receiptId ?? `${file.name}-${file.size}`;
@@ -66,6 +110,8 @@ const mapReceiptResponse = (data: Record<string, any>, file: File, durationMs: n
         buildReceiptItem(item, idx, String(receiptId)),
       )
     : [];
+  const aiCategories = Array.isArray(data?.aiCategories) ? (data.aiCategories as AiCategory[]) : undefined;
+  const categorizedItems = mapAiCategoriesToItems(items, aiCategories);
   const itemsTotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
   const total =
     parseNumber(receipt?.totalPrice) ??
@@ -91,10 +137,11 @@ const mapReceiptResponse = (data: Record<string, any>, file: File, durationMs: n
     unit: String(unit),
     currency: String(receipt?.currency || "EUR"),
     total,
-    items,
+    items: categorizedItems,
     merchantGroup: undefined,
     note: "",
     source: "qr",
+    aiCategories,
     raw: data?.fsJson ?? {},
     qrMeta: {
       source: data?.qrMeta?.source ?? "QR bloček",
@@ -134,14 +181,18 @@ export const parseReceipt = async (file: File): Promise<Receipt> => {
   return receipt;
 };
 
-export const categorizeItems = async (items: ReceiptItem[]): Promise<ReceiptItem[]> => {
-  const updated = items.map((item) => {
+export const categorizeItems = async (
+  items: ReceiptItem[],
+  aiCategories?: AiCategory[] | null,
+): Promise<ReceiptItem[]> => {
+  const withAi = mapAiCategoriesToItems(items, aiCategories);
+  const updated = withAi.map((item) => {
     const normalized = item.name.toLowerCase();
     const matched = Object.entries(CATEGORY_TREE).find(([_, subs]) =>
       subs.some((sub) => normalized.includes(sub.toLowerCase().split("/")[0])),
     );
     const fallbackMain = item.categoryMain || matched?.[0] || "Iné";
-    const fallbackSub = item.categorySub || matched?.[1]?.[0] || "Iné";
+    const fallbackSub = item.categorySub || matched?.[1]?.[0] || getDefaultSub(fallbackMain);
     return {
       ...item,
       categoryMain: fallbackMain,
