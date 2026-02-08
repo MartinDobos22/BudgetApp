@@ -190,7 +190,11 @@ export default function ReceiptOutput({
                           <InputLabel>Pod</InputLabel>
                           <Select
                             label="Pod"
-                            value={item.categorySub ?? ""}
+                            value={
+                              item.categoryMain && CATEGORY_TREE[item.categoryMain]?.includes(item.categorySub ?? "")
+                                ? (item.categorySub ?? "")
+                                : ""
+                            }
                             onChange={(event) =>
                               onItemCategoryChange(item.id, item.categoryMain ?? "", event.target.value)
                             }
