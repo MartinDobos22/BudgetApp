@@ -16,6 +16,13 @@ export interface ReceiptItem {
   categorySub?: string;
 }
 
+export interface AiCategory {
+  id: number;
+  name: string;
+  categoryKey: string;
+  category: string;
+}
+
 export interface Receipt {
   id: string;
   merchant: string;
@@ -27,6 +34,7 @@ export interface Receipt {
   note?: string;
   merchantGroup?: string;
   source: ReceiptSource;
+  aiCategories?: AiCategory[];
   raw?: unknown;
   qrMeta?: QrMeta;
 }
