@@ -62,6 +62,20 @@ const normalizeText = (value: string): string =>
 
 const getDefaultSub = (main?: string): string => (main ? CATEGORY_TREE[main]?.[0] ?? "" : "");
 
+const normalizeCategoryMain = (main?: string): string => (main && CATEGORY_TREE[main] ? main : "Iné");
+
+const normalizeCategorySub = (main: string, sub?: string): string => {
+  const options = CATEGORY_TREE[main] ?? [];
+  if (sub && options.includes(sub)) return sub;
+  return options[0] ?? "";
+};
+
+const normalizeCategoryPair = (main?: string, sub?: string): { main: string; sub: string } => {
+  const normalizedMain = normalizeCategoryMain(main);
+  const normalizedSub = normalizeCategorySub(normalizedMain, sub);
+  return { main: normalizedMain, sub: normalizedSub };
+};
+
 const findCategoryForLabel = (label: string): { main: string; sub: string } | null => {
   const normalizedLabel = normalizeText(label);
   if (!normalizedLabel) return null;
@@ -89,10 +103,11 @@ const mapAiCategoriesToItems = (items: ReceiptItem[], aiCategories: AiCategory[]
     if (!match) return item;
     const mapped = findCategoryForLabel(match.category);
     if (!mapped) return item;
+    const normalized = normalizeCategoryPair(mapped.main, mapped.sub);
     return {
       ...item,
-      categoryMain: mapped.main,
-      categorySub: mapped.sub,
+      categoryMain: normalized.main,
+      categorySub: normalized.sub,
     };
   });
 };
@@ -193,10 +208,11 @@ export const categorizeItems = async (
     );
     const fallbackMain = item.categoryMain || matched?.[0] || "Iné";
     const fallbackSub = item.categorySub || matched?.[1]?.[0] || getDefaultSub(fallbackMain);
+    const normalizedCategory = normalizeCategoryPair(fallbackMain, fallbackSub);
     return {
       ...item,
-      categoryMain: fallbackMain,
-      categorySub: fallbackSub,
+      categoryMain: normalizedCategory.main,
+      categorySub: normalizedCategory.sub,
     };
   });
   return Promise.resolve(updated);
