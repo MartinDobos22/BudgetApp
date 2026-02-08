@@ -23,7 +23,8 @@ interface ProcessReceiptPageProps {
 }
 
 export default function ProcessReceiptPage({ history, onSaveReceipt }: ProcessReceiptPageProps) {
-  const [file, setFile] = useState<File | null>(null);
+  const [fileQueue, setFileQueue] = useState<File[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [categorizeBusy, setCategorizeBusy] = useState(false);
@@ -34,6 +35,7 @@ export default function ProcessReceiptPage({ history, onSaveReceipt }: ProcessRe
   const [merchantGroup, setMerchantGroup] = useState(MERCHANT_GROUPS[0] ?? "");
   const [snackbar, setSnackbar] = useState<{ message: string; severity: "success" | "error" } | null>(null);
   const [duplicateReceipt, setDuplicateReceipt] = useState<Receipt | null>(null);
+  const currentFile = fileQueue[currentIndex] ?? null;
 
   const getRawSignature = (raw: unknown) => {
     if (!raw || typeof raw !== "object") return null;
@@ -64,37 +66,43 @@ export default function ProcessReceiptPage({ history, onSaveReceipt }: ProcessRe
   }, [receipt]);
 
   useEffect(() => {
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return currentFile ? URL.createObjectURL(currentFile) : null;
+    });
+    setError(null);
+    setReceipt(null);
+    setDuplicateReceipt(null);
+    setItems([]);
+    setNote("");
+    setMerchantGroup(MERCHANT_GROUPS[0] ?? "");
+  }, [currentFile]);
+
+  useEffect(() => {
     return () => {
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
 
-  const handleFileChange = (nextFile: File | null) => {
+  const handleFilesChange = (nextFiles: File[]) => {
     console.info("[process] File change", {
-      name: nextFile?.name,
-      size: nextFile?.size,
-      type: nextFile?.type,
-      lastModified: nextFile?.lastModified,
+      count: nextFiles.length,
+      names: nextFiles.map((fileItem) => fileItem.name),
     });
-    setFile(nextFile);
-    setError(null);
-    setReceipt(null);
-    setDuplicateReceipt(null);
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    const nextPreview = nextFile ? URL.createObjectURL(nextFile) : null;
-    console.info("[process] Preview URL updated", { hasPreview: Boolean(nextPreview) });
-    setPreviewUrl(nextPreview);
+    setFileQueue(nextFiles);
+    setCurrentIndex(0);
   };
 
   const handleCapture = (nextFile: File | null) => {
     console.info("[process] Capture input", { captured: Boolean(nextFile) });
-    handleFileChange(nextFile);
     if (nextFile) {
+      setFileQueue([nextFile]);
+      setCurrentIndex(0);
       void handleProcess(nextFile);
     }
   };
 
-  const handleProcess = async (selectedFile = file) => {
+  const handleProcess = async (selectedFile = currentFile) => {
     if (!selectedFile) {
       console.warn("[process] Missing file for processing");
       return;
@@ -174,7 +182,19 @@ export default function ProcessReceiptPage({ history, onSaveReceipt }: ProcessRe
       total: Number(items.reduce((sum, item) => sum + item.lineTotal, 0).toFixed(2)),
     };
     onSaveReceipt(updatedReceipt);
-    setSnackbar({ message: "Uložené do histórie.", severity: "success" });
+    setFileQueue((prev) => {
+      if (prev.length === 0) return prev;
+      const nextQueue = prev.filter((_, index) => index !== currentIndex);
+      if (nextQueue.length === 0) {
+        setCurrentIndex(0);
+      } else if (currentIndex >= nextQueue.length) {
+        setCurrentIndex(nextQueue.length - 1);
+      }
+      return nextQueue;
+    });
+    const nextMessage =
+      fileQueue.length > 1 ? "Uložené do histórie. Ďalší bloček je pripravený na spracovanie." : "Uložené do histórie.";
+    setSnackbar({ message: nextMessage, severity: "success" });
   };
 
   const totalInHistory = useMemo(() => history.length, [history.length]);
@@ -189,10 +209,12 @@ export default function ProcessReceiptPage({ history, onSaveReceipt }: ProcessRe
       </Stack>
 
       <UploadCard
-        file={file}
+        file={currentFile}
         previewUrl={previewUrl}
         busy={busy}
-        onFileChange={handleFileChange}
+        queuedFiles={fileQueue}
+        currentIndex={currentIndex}
+        onFilesChange={handleFilesChange}
         onCapture={handleCapture}
         onProcess={handleProcess}
       />

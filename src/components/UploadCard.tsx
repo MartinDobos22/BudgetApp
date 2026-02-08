@@ -17,25 +17,34 @@ interface UploadCardProps {
   file: File | null;
   previewUrl: string | null;
   busy: boolean;
-  onFileChange: (file: File | null) => void;
+  queuedFiles: File[];
+  currentIndex: number;
+  onFilesChange: (files: File[]) => void;
   onCapture: (file: File | null) => void;
   onProcess: () => void;
 }
 
-export default function UploadCard({ file, previewUrl, busy, onFileChange, onCapture, onProcess }: UploadCardProps) {
+export default function UploadCard({
+  file,
+  previewUrl,
+  busy,
+  queuedFiles,
+  currentIndex,
+  onFilesChange,
+  onCapture,
+  onProcess,
+}: UploadCardProps) {
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const captureRef = useRef<HTMLInputElement | null>(null);
 
-  const handleFile = (selected: File | null) => {
-    if (selected) {
+  const handleFiles = (selected: File[]) => {
+    if (selected.length > 0) {
       console.info("[upload] File selected", {
-        name: selected.name,
-        size: selected.size,
-        type: selected.type,
-        lastModified: selected.lastModified,
+        count: selected.length,
+        names: selected.map((fileItem) => fileItem.name),
       });
-      onFileChange(selected);
+      onFilesChange(selected);
     } else {
       console.warn("[upload] No file selected");
     }
@@ -45,20 +54,22 @@ export default function UploadCard({ file, previewUrl, busy, onFileChange, onCap
     (event: DragEvent<HTMLDivElement>) => {
       event.preventDefault();
       setIsDragging(false);
-      const dropped = event.dataTransfer.files?.[0];
+      const dropped = Array.from(event.dataTransfer.files ?? []);
       console.info("[upload] File dropped", {
-        name: dropped?.name,
-        size: dropped?.size,
-        type: dropped?.type,
+        count: dropped.length,
+        names: dropped.map((fileItem) => fileItem.name),
       });
-      handleFile(dropped ?? null);
+      handleFiles(dropped);
     },
-    [onFileChange],
+    [onFilesChange],
   );
 
   return (
     <Card>
-      <CardHeader title="Nahraj QR bloček" subheader="Podporujeme PNG/JPG z galérie alebo fotoaparátu." />
+      <CardHeader
+        title="Nahraj QR bloček"
+        subheader="Podporujeme PNG/JPG z galérie alebo fotoaparátu (môžete vybrať viac súborov naraz)."
+      />
       {busy && <LinearProgress />}
       <CardContent>
         <Stack spacing={2}>
@@ -101,7 +112,7 @@ export default function UploadCard({ file, previewUrl, busy, onFileChange, onCap
                 }}
                 disabled={busy}
               >
-                Vybrať súbor
+                Vybrať súbory
               </Button>
               <Button
                 variant="outlined"
@@ -119,10 +130,11 @@ export default function UploadCard({ file, previewUrl, busy, onFileChange, onCap
               ref={inputRef}
               type="file"
               accept="image/*"
+              multiple
               hidden
               onChange={(event) => {
                 console.info("[upload] File input changed");
-                handleFile(event.target.files?.[0] ?? null);
+                handleFiles(Array.from(event.target.files ?? []));
               }}
             />
             <input
@@ -157,6 +169,26 @@ export default function UploadCard({ file, previewUrl, busy, onFileChange, onCap
             <Typography variant="body2" color="text.secondary">
               Zatiaľ nebol vybraný žiadny súbor.
             </Typography>
+          )}
+          {queuedFiles.length > 1 && (
+            <Stack spacing={1}>
+              <Typography variant="subtitle2">
+                Fronta spracovania: {currentIndex + 1} / {queuedFiles.length}
+              </Typography>
+              <Stack spacing={0.5}>
+                {queuedFiles.map((queuedFile, index) => (
+                  <Typography
+                    key={`${queuedFile.name}-${queuedFile.lastModified}`}
+                    variant="body2"
+                    color={index === currentIndex ? "text.primary" : "text.secondary"}
+                    fontWeight={index === currentIndex ? 600 : 400}
+                  >
+                    {index === currentIndex ? "▶ " : "• "}
+                    {queuedFile.name}
+                  </Typography>
+                ))}
+              </Stack>
+            </Stack>
           )}
         </Stack>
       </CardContent>
